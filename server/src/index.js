@@ -53,6 +53,7 @@ io.on('connection', (socket) => {
 });
 
 // ── REST endpoints ─────────────────────────────────────────────────────────────
+app.get('/', (_req, res) => res.json({ status: 'ok', message: 'AI Video Calling Signaling Server is running 🚀' }));
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.get('/api/rooms/:roomId', (req, res) => {
