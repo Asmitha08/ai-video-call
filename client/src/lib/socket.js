@@ -10,7 +10,8 @@ import { io } from 'socket.io-client';
  *
  * In production: set VITE_SERVER_URL to your deployed server URL.
  */
-const SOCKET_URL = import.meta.env.VITE_SERVER_URL ?? window.location.origin;
+const envUrl = import.meta.env.VITE_SERVER_URL;
+const SOCKET_URL = (envUrl && envUrl.trim().length > 0) ? envUrl.trim() : window.location.origin;
 
 console.log('[socket] connecting to:', SOCKET_URL);
 
