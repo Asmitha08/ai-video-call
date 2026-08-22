@@ -106,4 +106,24 @@ export function registerTranslationHandlers(io, socket, roomManager) {
       }
     }
   );
+
+  // ── 4. Deep Learning Neural Text-To-Speech (TTS) ───────────────────────────
+  socket.on('caption:tts', async ({ text, targetLang }, callback) => {
+    try {
+      const { synthesizeNeuralSpeech } = await import('../services/ttsService.js');
+      const result = await synthesizeNeuralSpeech(text, targetLang);
+      if (typeof callback === 'function') {
+        if (result?.audioBase64) {
+          callback({ audioBase64: result.audioBase64, mimeType: result.mimeType, voice: result.voice });
+        } else {
+          callback({ error: 'TTS synthesis returned empty audio' });
+        }
+      }
+    } catch (err) {
+      console.warn('[caption:tts] error:', err.message);
+      if (typeof callback === 'function') {
+        callback({ error: err.message });
+      }
+    }
+  });
 }

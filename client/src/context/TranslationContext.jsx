@@ -114,34 +114,67 @@ export function TranslationProvider({ children }) {
     }
   }, []);
 
-  // ── Text-to-Speech (TTS) Voice Synthesis ──────────────────────────────────
+  const activeAudioRef = useRef(null);
+
+  // ── Text-to-Speech (TTS) Voice Synthesis (Deep Learning Neural TTS) ─────────
   const speakText = useCallback(
-    (text, langCode) => {
-      if (!speakTranslations || !text || !('speechSynthesis' in window)) return;
+    async (text, langCode) => {
+      if (!speakTranslations || !text || !text.trim()) return;
+      const targetCode = (langCode || targetLanguage || 'en').split('-')[0].toLowerCase();
+
+      // 1. Try Deep Learning Neural TTS from server
       try {
-        window.speechSynthesis.cancel();
-        const targetLangObj = getLanguageByCode(langCode || targetLanguage);
-        const bcp47 = targetLangObj.bcp47 || 'en-US';
+        const audioData = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('timeout')), 3000);
+          socket.emit('caption:tts', { text: text.trim(), targetLang: targetCode }, (res) => {
+            clearTimeout(timeout);
+            if (res?.audioBase64) resolve(res);
+            else reject(new Error(res?.error || 'no neural audio'));
+          });
+        });
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = bcp47;
-        utterance.rate = 1.0;
-        utterance.volume = 1.0;
-
-        const voices = synthVoicesRef.current.length
-          ? synthVoicesRef.current
-          : window.speechSynthesis.getVoices();
-
-        const matchedVoice = voices.find(
-          (v) => v.lang.toLowerCase() === bcp47.toLowerCase() || v.lang.startsWith(bcp47.split('-')[0])
-        );
-        if (matchedVoice) {
-          utterance.voice = matchedVoice;
+        if (audioData?.audioBase64) {
+          if (activeAudioRef.current) {
+            try { activeAudioRef.current.pause(); } catch {}
+          }
+          const audio = new Audio(`data:${audioData.mimeType || 'audio/mp3'};base64,${audioData.audioBase64}`);
+          audio.volume = 1.0;
+          activeAudioRef.current = audio;
+          await audio.play();
+          console.log(`[tts:neural] playing voice (${audioData.voice})`);
+          return;
         }
-
-        window.speechSynthesis.speak(utterance);
       } catch (err) {
-        console.warn('[tts] error:', err);
+        console.warn('[tts:neural] falling back to browser synthesis:', err.message);
+      }
+
+      // 2. Fallback to browser SpeechSynthesis
+      if ('speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const targetLangObj = getLanguageByCode(targetCode);
+          const bcp47 = targetLangObj.bcp47 || 'en-US';
+
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = bcp47;
+          utterance.rate = 1.0;
+          utterance.volume = 1.0;
+
+          const voices = synthVoicesRef.current.length
+            ? synthVoicesRef.current
+            : window.speechSynthesis.getVoices();
+
+          const matchedVoice = voices.find(
+            (v) => v.lang.toLowerCase() === bcp47.toLowerCase() || v.lang.startsWith(targetCode)
+          );
+          if (matchedVoice) {
+            utterance.voice = matchedVoice;
+          }
+
+          window.speechSynthesis.speak(utterance);
+        } catch (synthErr) {
+          console.warn('[tts:synth] error:', synthErr);
+        }
       }
     },
     [speakTranslations, targetLanguage]

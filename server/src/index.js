@@ -85,6 +85,19 @@ app.post('/api/translate', async (req, res) => {
   }
 });
 
+app.post('/api/tts', async (req, res) => {
+  const { text, targetLang = 'en' } = req.body;
+  if (!text) return res.status(400).json({ error: 'Text is required' });
+  try {
+    const { synthesizeNeuralSpeech } = await import('./services/ttsService.js');
+    const result = await synthesizeNeuralSpeech(text, targetLang);
+    if (!result) return res.status(500).json({ error: 'TTS generation failed' });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start (bind on all interfaces so LAN devices can reach it) ─────────────────
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, '0.0.0.0', () => {
