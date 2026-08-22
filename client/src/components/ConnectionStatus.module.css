@@ -1,0 +1,29 @@
+.container {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.idle       { background: hsl(0, 0%, 45%); }
+.connecting { background: hsl(45, 90%, 55%); animation: pulse 1.2s ease-in-out infinite; }
+.connected  { background: hsl(140, 70%, 55%); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}

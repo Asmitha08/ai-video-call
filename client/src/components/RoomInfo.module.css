@@ -1,0 +1,57 @@
+.container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 0.35rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.code {
+  font-family: 'Courier New', monospace;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--color-text);
+  background: rgba(255,255,255,0.07);
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.7rem;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.07);
+  color: var(--color-text);
+  font-size: 0.76rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, transform 0.12s;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: rgba(255,255,255,0.13);
+  transform: translateY(-1px);
+}
+.btn:active { transform: scale(0.96); }
+
+.btnSuccess {
+  border-color: rgba(80,200,120,0.4);
+  background: rgba(80,200,120,0.12);
+  color: hsl(145,60%,65%);
+}
