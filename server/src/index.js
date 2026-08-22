@@ -15,13 +15,14 @@ const httpServer = createServer(app);
 
 // ── CORS ───────────────────────────────────────────────────────────────────────
 const allowedOrigins = process.env.CLIENT_ORIGIN
-  ? [process.env.CLIENT_ORIGIN]
+  ? (process.env.CLIENT_ORIGIN === '*' ? true : process.env.CLIENT_ORIGIN.split(',').map(s => s.trim()))
   : [
       /^https?:\/\/localhost(:\d+)?$/,
       /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
       /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,   // LAN
       /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,    // LAN (10.x)
       /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/,  // LAN (172.x)
+      /https:\/\/.*\.vercel\.app$/,               // Vercel apps
     ];
 
 const corsOptions = {
