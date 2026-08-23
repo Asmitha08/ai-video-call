@@ -22,10 +22,16 @@ export default function CallPage() {
   const [isTranslateSettingsOpen, setIsTranslateSettingsOpen] = useState(false);
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
 
-  // Redirect home if no active call
+  // If user navigated directly to /call/:roomId without joining
   useEffect(() => {
-    if (callStatus === 'idle') navigate('/', { replace: true });
-  }, [callStatus, navigate]);
+    if (callStatus === 'idle' && !room) {
+      if (roomId) {
+        navigate(`/join/${roomId}`, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    }
+  }, [callStatus, room, roomId, navigate]);
 
   // Call duration timer — starts once connected
   useEffect(() => {
