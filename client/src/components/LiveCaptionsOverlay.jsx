@@ -15,8 +15,13 @@ export default function LiveCaptionsOverlay({ targetSocketId }) {
 
   let caption = null;
   if (targetSocketId) {
-    caption = liveCaptions[targetSocketId];
-  } else {
+    caption =
+      liveCaptions[targetSocketId] ||
+      (targetSocketId === socket.id ? liveCaptions['local'] : null) ||
+      (targetSocketId === 'local' && socket.id ? liveCaptions[socket.id] : null);
+  }
+  
+  if (!caption && !targetSocketId) {
     // Global mode: pick the most recent active caption
     const entries = Object.values(liveCaptions);
     if (entries.length > 0) {

@@ -47,57 +47,110 @@ export function TranslationProvider({ children }) {
     }
   }, []);
 
-  // ── Fast Translation helper ───────────────────────────────────────────────
+  // ── Bulletproof Multi-Tier Translation Helper ────────────────────────────
   const translate = useCallback(
     async (text, sourceLang, targetLang) => {
       if (!text || !text.trim()) return '';
+      const cleanText = text.trim();
       const sLang = sourceLang ? sourceLang.split('-')[0].toLowerCase() : 'auto';
       const tLang = targetLang ? targetLang.split('-')[0].toLowerCase() : 'en';
 
-      if (sLang === tLang && sLang !== 'auto') return text;
+      if (sLang === tLang && sLang !== 'auto') return cleanText;
 
-      const cacheKey = `${sLang}->${tLang}:${text.trim().toLowerCase()}`;
+      const cacheKey = `${sLang}->${tLang}:${cleanText.toLowerCase()}`;
       if (clientTranslationCache.current.has(cacheKey)) {
         return clientTranslationCache.current.get(cacheKey);
       }
 
-      try {
-        const socketPromise = new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error('timeout')), 1800);
-          socket.emit(
-            'caption:translate',
-            { text, sourceLang: sLang, targetLang: tLang },
-            (response) => {
-              clearTimeout(timer);
-              if (response?.translatedText) resolve(response.translatedText);
-              else reject(new Error('no text'));
-            }
-          );
-        });
-
-        const translated = await socketPromise;
-        clientTranslationCache.current.set(cacheKey, translated);
-        return translated;
-      } catch {
+      // Tier 1: Socket.IO Server Translation (if connected)
+      if (socket.connected) {
         try {
-          const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, sourceLang: sLang, targetLang: tLang }),
+          const translated = await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('socket timeout')), 3000);
+            socket.emit(
+              'caption:translate',
+              { text: cleanText, sourceLang: sLang, targetLang: tLang },
+              (response) => {
+                clearTimeout(timer);
+                if (response?.translatedText && response.translatedText.trim()) {
+                  resolve(response.translatedText.trim());
+                } else {
+                  reject(new Error('empty socket translation'));
+                }
+              }
+            );
           });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.translatedText) {
-              clientTranslationCache.current.set(cacheKey, data.translatedText);
-              return data.translatedText;
-            }
+          if (translated) {
+            clientTranslationCache.current.set(cacheKey, translated);
+            return translated;
           }
         } catch (err) {
-          console.warn('[translate] error:', err);
+          console.warn('[translate:socket] fallback:', err.message);
         }
       }
 
-      return text;
+      // Tier 2: Backend REST API (/api/translate)
+      try {
+        const res = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: cleanText, sourceLang: sLang, targetLang: tLang }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.translatedText && data.translatedText.trim()) {
+            const translated = data.translatedText.trim();
+            clientTranslationCache.current.set(cacheKey, translated);
+            return translated;
+          }
+        }
+      } catch (err) {
+        console.warn('[translate:api] fallback:', err.message);
+      }
+
+      // Tier 3: Direct Browser Google Translate GTX (Zero Backend Dependency)
+      try {
+        const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
+          sLang
+        )}&tl=${encodeURIComponent(tLang)}&dt=t&q=${encodeURIComponent(cleanText)}`;
+        const gRes = await fetch(gUrl);
+        if (gRes.ok) {
+          const gData = await gRes.json();
+          if (Array.isArray(gData) && Array.isArray(gData[0])) {
+            const translated = gData[0]
+              .map((item) => (item && item[0] ? item[0] : ''))
+              .join('')
+              .trim();
+            if (translated) {
+              clientTranslationCache.current.set(cacheKey, translated);
+              return translated;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[translate:google-direct] fallback:', err.message);
+      }
+
+      // Tier 4: Direct Browser MyMemory Free API Fallback
+      try {
+        const sl = sLang === 'auto' ? 'en' : sLang;
+        const mUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
+          cleanText
+        )}&langpair=${encodeURIComponent(sl)}|${encodeURIComponent(tLang)}`;
+        const mRes = await fetch(mUrl);
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          if (mData?.responseData?.translatedText) {
+            const translated = mData.responseData.translatedText.trim();
+            clientTranslationCache.current.set(cacheKey, translated);
+            return translated;
+          }
+        }
+      } catch (err) {
+        console.warn('[translate:mymemory-direct] failed:', err.message);
+      }
+
+      return cleanText;
     },
     []
   );
@@ -293,6 +346,8 @@ export function TranslationProvider({ children }) {
         const isFinal = Boolean(finalTranscript);
         const myLangCode = myLanguage.split('-')[0];
 
+        const activeSocketId = socket.id || 'local';
+
         // Broadcast to all participants in the room
         socket.emit('caption:speak', {
           text: activeText,
@@ -305,7 +360,7 @@ export function TranslationProvider({ children }) {
         const translated = await translate(activeText, myLangCode, targetLanguage);
 
         updateCaption({
-          socketId: socket.id,
+          socketId: activeSocketId,
           displayName: room?.displayName || 'You',
           originalText: activeText,
           translatedText: translated,
@@ -398,6 +453,8 @@ export function TranslationProvider({ children }) {
       const clean = text.trim();
       const myLangCode = myLanguage.split('-')[0];
 
+      const activeSocketId = socket.id || 'local';
+
       socket.emit('caption:speak', {
         text: clean,
         sourceLang: myLangCode,
@@ -408,7 +465,7 @@ export function TranslationProvider({ children }) {
       const translated = await translate(clean, myLangCode, targetLanguage);
 
       updateCaption({
-        socketId: socket.id,
+        socketId: activeSocketId,
         displayName: room?.displayName || 'You',
         originalText: clean,
         translatedText: translated,
