@@ -49,22 +49,36 @@ export function CallProvider({ children }) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream;
+      try {
+        // Stage 1: Try requested / ideal constraints
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (firstErr) {
+        console.warn('[media] ideal constraints failed, trying basic video+audio:', firstErr.name);
+        try {
+          // Stage 2: Try basic unconstrained video + audio
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        } catch (secondErr) {
+          console.warn('[media] video+audio failed, trying audio-only fallback:', secondErr.name);
+          // Stage 3: Audio only fallback if camera is blocked/busy
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          setIsVideoOff(true);
+        }
+      }
+
       localStreamRef.current = stream;
       setLocalStream(stream);
       setCallError(null);
       return stream;
     } catch (err) {
-      // Build a friendly message and throw it so callers can use err.message
-      // directly in catch blocks — no reliance on stale React callError state.
       const friendly =
-        err.name === 'NotAllowedError'
-          ? 'Camera/mic permission denied. Please allow access in your browser and try again.'
-          : err.name === 'NotFoundError'
-          ? 'No camera or microphone found. Please connect a device and try again.'
-          : err.name === 'NotReadableError' || err.message?.includes('Could not start')
-          ? 'Camera is already in use by another application. Close it and try again.'
-          : `Could not access camera: ${err.message}`;
+        err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+          ? 'Camera/Mic permission blocked. Click the 🔒 padlock or tune icon in your browser address bar and set Camera & Microphone to "Allow".'
+          : err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError'
+          ? 'No camera or microphone found. Please connect a device or check system settings.'
+          : err.name === 'NotReadableError' || err.name === 'TrackStartError' || err.message?.includes('Could not start')
+          ? 'Camera is in use by another app or tab (e.g. Zoom, Teams, Chrome). Please close it and reload.'
+          : `Could not access media: ${err.message}`;
       setCallError(friendly);
       const richErr = new Error(friendly);
       richErr.original = err;
