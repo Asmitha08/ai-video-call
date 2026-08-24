@@ -1,5 +1,6 @@
 import { useTranslation } from '../context/TranslationContext.jsx';
 import { getLanguageByCode } from '../lib/languages.js';
+import { socket } from '../lib/socket.js';
 import styles from './LiveCaptionsOverlay.module.css';
 
 /**
@@ -17,8 +18,9 @@ export default function LiveCaptionsOverlay({ targetSocketId }) {
   if (targetSocketId) {
     caption =
       liveCaptions[targetSocketId] ||
-      (targetSocketId === socket.id ? liveCaptions['local'] : null) ||
-      (targetSocketId === 'local' && socket.id ? liveCaptions[socket.id] : null);
+      (socket?.id && targetSocketId === socket.id ? liveCaptions['local'] : null) ||
+      (targetSocketId === 'local' && socket?.id ? liveCaptions[socket.id] : null) ||
+      (targetSocketId === 'local' ? liveCaptions['local'] : null);
   }
   
   if (!caption && !targetSocketId) {

@@ -108,16 +108,42 @@ export function TranslationProvider({ children }) {
         console.warn('[translate:api] fallback:', err.message);
       }
 
-      // Tier 3: Direct Browser Google Translate GTX (Zero Backend Dependency)
+      // Tier 3: Direct Browser Google Clients5 Translation Endpoint
       try {
-        const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(
+        const gUrl = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(
           sLang
-        )}&tl=${encodeURIComponent(tLang)}&dt=t&q=${encodeURIComponent(cleanText)}`;
+        )}&tl=${encodeURIComponent(tLang)}&q=${encodeURIComponent(cleanText)}`;
         const gRes = await fetch(gUrl);
         if (gRes.ok) {
           const gData = await gRes.json();
-          if (Array.isArray(gData) && Array.isArray(gData[0])) {
-            const translated = gData[0]
+          if (Array.isArray(gData) && gData[0]) {
+            const translated =
+              typeof gData[0] === 'string'
+                ? gData[0]
+                : Array.isArray(gData[0])
+                ? gData[0][0]
+                : String(gData[0]);
+            if (translated && translated.trim()) {
+              const resText = translated.trim();
+              clientTranslationCache.current.set(cacheKey, resText);
+              return resText;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[translate:clients5-direct] fallback:', err.message);
+      }
+
+      // Tier 4: Direct Browser Single Endpoint with dict-chrome-ex
+      try {
+        const sUrl = `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=${encodeURIComponent(
+          sLang
+        )}&tl=${encodeURIComponent(tLang)}&dt=t&q=${encodeURIComponent(cleanText)}`;
+        const sRes = await fetch(sUrl);
+        if (sRes.ok) {
+          const sData = await sRes.json();
+          if (Array.isArray(sData) && Array.isArray(sData[0])) {
+            const translated = sData[0]
               .map((item) => (item && item[0] ? item[0] : ''))
               .join('')
               .trim();
@@ -128,10 +154,10 @@ export function TranslationProvider({ children }) {
           }
         }
       } catch (err) {
-        console.warn('[translate:google-direct] fallback:', err.message);
+        console.warn('[translate:googleapis-direct] fallback:', err.message);
       }
 
-      // Tier 4: Direct Browser MyMemory Free API Fallback
+      // Tier 5: Direct Browser MyMemory Free API Fallback
       try {
         const sl = sLang === 'auto' ? 'en' : sLang;
         const mUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
@@ -140,10 +166,15 @@ export function TranslationProvider({ children }) {
         const mRes = await fetch(mUrl);
         if (mRes.ok) {
           const mData = await mRes.json();
-          if (mData?.responseData?.translatedText) {
-            const translated = mData.responseData.translatedText.trim();
-            clientTranslationCache.current.set(cacheKey, translated);
-            return translated;
+          let translated = mData?.responseData?.translatedText;
+          if ((!translated || !translated.trim()) && Array.isArray(mData?.matches)) {
+            const validMatch = mData.matches.find((m) => m && m.translation && m.translation.trim());
+            if (validMatch) translated = validMatch.translation;
+          }
+          if (translated && translated.trim()) {
+            const resText = translated.trim();
+            clientTranslationCache.current.set(cacheKey, resText);
+            return resText;
           }
         }
       } catch (err) {
