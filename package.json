@@ -2,8 +2,10 @@
   "name": "ai-video-call",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "AI-powered video calling app using WebRTC, Socket.IO, React, and Node.js",
   "scripts": {
+    "npm": "npm",
     "build": "npm --prefix client install && npm --prefix client run build",
     "dev": "npm --prefix client run dev",
     "dev:client": "npm --prefix client run dev",
