@@ -4,6 +4,7 @@
   "private": true,
   "description": "AI-powered video calling app using WebRTC, Socket.IO, React, and Node.js",
   "scripts": {
+    "build": "npm --prefix client install && npm --prefix client run build",
     "dev": "npm --prefix client run dev",
     "dev:client": "npm --prefix client run dev",
     "dev:server": "npm --prefix server run dev",
