@@ -11,7 +11,20 @@ import { io } from 'socket.io-client';
  * In production: set VITE_SERVER_URL to your deployed server URL.
  */
 const envUrl = import.meta.env.VITE_SERVER_URL;
-const SOCKET_URL = (envUrl && envUrl.trim().length > 0) ? envUrl.trim() : window.location.origin;
+const isProdOrVercel =
+  typeof window !== 'undefined' &&
+  (window.location.hostname.includes('vercel.app') ||
+    window.location.hostname.includes('onrender.com') ||
+    import.meta.env.PROD);
+
+const RENDER_BACKEND_URL = 'https://ai-video-call-1.onrender.com';
+
+const SOCKET_URL =
+  envUrl && envUrl.trim().length > 0
+    ? envUrl.trim()
+    : isProdOrVercel && !window.location.hostname.includes('localhost')
+    ? RENDER_BACKEND_URL
+    : window.location.origin;
 
 console.log('[socket] connecting to:', SOCKET_URL);
 

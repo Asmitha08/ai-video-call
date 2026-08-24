@@ -21,10 +21,14 @@ export default function LiveCaptionsOverlay({ targetSocketId }) {
       (socket?.id && targetSocketId === socket.id ? liveCaptions['local'] : null) ||
       (targetSocketId === 'local' && socket?.id ? liveCaptions[socket.id] : null) ||
       (targetSocketId === 'local' ? liveCaptions['local'] : null);
+
+    if (!caption && (targetSocketId === 'local' || (socket?.id && targetSocketId === socket.id))) {
+      caption = liveCaptions['local'] || (socket?.id ? liveCaptions[socket.id] : null);
+    }
   }
   
-  if (!caption && !targetSocketId) {
-    // Global mode: pick the most recent active caption
+  if (!caption) {
+    // Global mode / resilient fallback: pick the most recent active caption
     const entries = Object.values(liveCaptions);
     if (entries.length > 0) {
       caption = entries.sort((a, b) => b.timestamp - a.timestamp)[0];
