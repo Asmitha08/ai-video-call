@@ -322,126 +322,176 @@ export function TranslationProvider({ children }) {
     [speakText]
   );
 
+  // ── Stable State Refs (Prevents Re-render Abortion Loops) ────────────────
+  const updateCaptionRef = useRef(updateCaption);
+  updateCaptionRef.current = updateCaption;
+
+  const translateRef = useRef(translate);
+  translateRef.current = translate;
+
+  const myLangRef = useRef(myLanguage);
+  myLangRef.current = myLanguage;
+
+  const targetLangRef = useRef(targetLanguage);
+  targetLangRef.current = targetLanguage;
+
+  const roomRef = useRef(room);
+  roomRef.current = room;
+
+  const isAudioMutedRef = useRef(isAudioMuted);
+  isAudioMutedRef.current = isAudioMuted;
+
+  const captionsEnabledRef = useRef(captionsEnabled);
+  captionsEnabledRef.current = captionsEnabled;
+
   // ── High-Accuracy Speech Recognition Engine ───────────────────────────────
   useEffect(() => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    if (!SpeechRecognition || !captionsEnabled || isAudioMuted || !room) {
-      isListeningRef.current = false;
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.onend = null;
-          recognitionRef.current.onerror = null;
-          recognitionRef.current.abort();
-        } catch {}
-        recognitionRef.current = null;
-      }
+    let activeSession = null;
+    let isStopped = false;
+    let restartTimer = null;
+
+    if (!captionsEnabled || isAudioMuted || !room) {
       setIsTranscribing(false);
       return;
     }
 
-    isListeningRef.current = true;
-    let recognition = null;
+    function startSession() {
+      if (isStopped) return;
+      if (!SpeechRecognition) {
+        console.warn('[speech:recognition] Web Speech API not supported in this browser.');
+        return;
+      }
 
-    try {
-      const myLangObj = getLanguageByCode(myLanguage);
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = myLangObj.bcp47 || 'en-US';
+      try {
+        if (activeSession) {
+          try {
+            activeSession.onend = null;
+            activeSession.onerror = null;
+            activeSession.abort();
+          } catch {}
+          activeSession = null;
+        }
 
-      recognition.onstart = () => {
-        setIsTranscribing(true);
-      };
+        const langObj = getLanguageByCode(myLangRef.current);
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+        recognition.lang = langObj.bcp47 || 'en-US';
 
-      recognition.onresult = async (event) => {
-        let interim = '';
-        let finalTranscript = '';
+        recognition.onstart = () => {
+          if (!isStopped) {
+            setIsTranscribing(true);
+            console.log('[speech:recognition] active listening for lang:', recognition.lang);
+          }
+        };
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const item = event.results[i];
-          if (item && item[0]) {
-            if (item.isFinal) {
-              finalTranscript += item[0].transcript;
-            } else {
-              interim += item[0].transcript;
+        recognition.onresult = async (event) => {
+          if (isStopped || isAudioMutedRef.current || !captionsEnabledRef.current) return;
+
+          let interim = '';
+          let finalTranscript = '';
+
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const item = event.results[i];
+            if (item && item[0]) {
+              if (item.isFinal) {
+                finalTranscript += item[0].transcript;
+              } else {
+                interim += item[0].transcript;
+              }
             }
           }
-        }
 
-        const activeText = (finalTranscript || interim).trim();
-        if (!activeText) return;
+          const activeText = (finalTranscript || interim).trim();
+          if (!activeText) return;
 
-        const isFinal = Boolean(finalTranscript);
-        const myLangCode = myLanguage.split('-')[0];
+          const isFinal = Boolean(finalTranscript);
+          const currentMyLang = (myLangRef.current || 'en').split('-')[0];
+          const currentTargetLang = targetLangRef.current || 'te';
+          const currentRoom = roomRef.current;
+          const activeSocketId = socket.id || 'local';
 
-        const activeSocketId = socket.id || 'local';
+          // Broadcast to all participants in the room
+          socket.emit('caption:speak', {
+            text: activeText,
+            sourceLang: currentMyLang,
+            isFinal,
+            displayName: currentRoom?.displayName || 'You',
+          });
 
-        // Broadcast to all participants in the room
-        socket.emit('caption:speak', {
-          text: activeText,
-          sourceLang: myLangCode,
-          isFinal,
-          displayName: room?.displayName || 'You',
-        });
+          // Translate for local subtitle view
+          const translated = await translateRef.current(activeText, currentMyLang, currentTargetLang);
 
-        // Translate for local subtitle view
-        const translated = await translate(activeText, myLangCode, targetLanguage);
+          if (updateCaptionRef.current) {
+            updateCaptionRef.current({
+              socketId: activeSocketId,
+              displayName: currentRoom?.displayName || 'You',
+              originalText: activeText,
+              translatedText: translated,
+              sourceLang: currentMyLang,
+              targetLang: currentTargetLang,
+              isFinal,
+            });
+          }
+        };
 
-        updateCaption({
-          socketId: activeSocketId,
-          displayName: room?.displayName || 'You',
-          originalText: activeText,
-          translatedText: translated,
-          sourceLang: myLangCode,
-          targetLang: targetLanguage,
-          isFinal,
-        });
-      };
+        recognition.onerror = (e) => {
+          if (e.error === 'no-speech' || e.error === 'aborted') {
+            return;
+          }
+          console.warn('[speech:recognition] error:', e.error);
+          if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            isStopped = true;
+            setIsTranscribing(false);
+          }
+        };
 
-      recognition.onerror = (e) => {
-        if (e.error === 'no-speech' || e.error === 'aborted') return;
-        console.warn('[speech:recognition] error:', e.error);
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-          isListeningRef.current = false;
-        }
-      };
+        recognition.onend = () => {
+          if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
+            setIsTranscribing(false);
+            return;
+          }
 
-      recognition.onend = () => {
-        if (isListeningRef.current && captionsEnabled && !isAudioMuted && room) {
-          if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-          restartTimerRef.current = setTimeout(() => {
-            if (isListeningRef.current) {
-              try { recognition.start(); } catch {}
+          // Restart session smoothly with fresh instance
+          if (restartTimer) clearTimeout(restartTimer);
+          restartTimer = setTimeout(() => {
+            if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
+              startSession();
             }
-          }, 800);
-        } else {
-          setIsTranscribing(false);
+          }, 300);
+        };
+
+        recognition.start();
+        activeSession = recognition;
+        recognitionRef.current = recognition;
+      } catch (err) {
+        console.warn('[speech:session] failed to start:', err);
+        if (!isStopped) {
+          if (restartTimer) clearTimeout(restartTimer);
+          restartTimer = setTimeout(startSession, 1000);
         }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-
-    } catch (err) {
-      console.warn('[speech:init] failed:', err);
+      }
     }
 
+    startSession();
+
     return () => {
-      isListeningRef.current = false;
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      if (recognition) {
+      isStopped = true;
+      if (restartTimer) clearTimeout(restartTimer);
+      if (activeSession) {
         try {
-          recognition.onend = null;
-          recognition.onerror = null;
-          recognition.abort();
+          activeSession.onend = null;
+          activeSession.onerror = null;
+          activeSession.abort();
         } catch {}
       }
       setIsTranscribing(false);
     };
-  }, [captionsEnabled, isAudioMuted, room, myLanguage, targetLanguage, translate, updateCaption]);
+  }, [captionsEnabled, isAudioMuted, room, myLanguage]);
 
   // ── Receive captions from server (Live Broadcast) ─────────────────────────
   useEffect(() => {
