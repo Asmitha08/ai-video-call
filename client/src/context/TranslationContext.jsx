@@ -322,6 +322,8 @@ export function TranslationProvider({ children }) {
     [speakText]
   );
 
+  const [sttError, setSttError] = useState(null);
+
   // ── Stable State Refs (Prevents Re-render Abortion Loops) ────────────────
   const updateCaptionRef = useRef(updateCaption);
   updateCaptionRef.current = updateCaption;
@@ -358,12 +360,13 @@ export function TranslationProvider({ children }) {
       return;
     }
 
+    if (!SpeechRecognition) {
+      setSttError('Speech recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.');
+      return;
+    }
+
     function startSession() {
       if (isStopped) return;
-      if (!SpeechRecognition) {
-        console.warn('[speech:recognition] Web Speech API not supported in this browser.');
-        return;
-      }
 
       try {
         if (activeSession) {
@@ -385,7 +388,8 @@ export function TranslationProvider({ children }) {
         recognition.onstart = () => {
           if (!isStopped) {
             setIsTranscribing(true);
-            console.log('[speech:recognition] active listening for lang:', recognition.lang);
+            setSttError(null);
+            console.log('[speech:recognition] listening active for lang:', recognition.lang);
           }
         };
 
@@ -395,11 +399,11 @@ export function TranslationProvider({ children }) {
           let interim = '';
           let finalTranscript = '';
 
-          for (let i = event.resultIndex; i < event.results.length; ++i) {
+          for (let i = 0; i < event.results.length; ++i) {
             const item = event.results[i];
             if (item && item[0]) {
               if (item.isFinal) {
-                finalTranscript += item[0].transcript;
+                finalTranscript += item[0].transcript + ' ';
               } else {
                 interim += item[0].transcript;
               }
@@ -409,7 +413,7 @@ export function TranslationProvider({ children }) {
           const activeText = (finalTranscript || interim).trim();
           if (!activeText) return;
 
-          const isFinal = Boolean(finalTranscript);
+          const isFinal = Boolean(finalTranscript.trim());
           const currentMyLang = (myLangRef.current || 'en').split('-')[0];
           const currentTargetLang = targetLangRef.current || 'te';
           const currentRoom = roomRef.current;
@@ -445,8 +449,13 @@ export function TranslationProvider({ children }) {
           }
           console.warn('[speech:recognition] error:', e.error);
           if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+            setSttError('Microphone access blocked for speech recognition. Please click the 🔒 icon in your browser URL bar and allow Microphone access.');
             isStopped = true;
             setIsTranscribing(false);
+          } else if (e.error === 'audio-capture') {
+            setSttError('No microphone detected. Please check your microphone connection.');
+          } else if (e.error === 'network') {
+            console.warn('[speech:recognition] network blip, restarting...');
           }
         };
 
@@ -574,6 +583,7 @@ export function TranslationProvider({ children }) {
     setSpeakTranslations,
     toggleSpeakTranslations,
     isTranscribing,
+    sttError,
     sendManualCaption,
     liveCaptions,
     transcriptHistory,
