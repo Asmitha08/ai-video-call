@@ -15,18 +15,19 @@ An AI-powered, real-time video calling application featuring peer-to-peer WebRTC
 ## ✨ Features
 
 - 📹 **P2P Video & Audio Calling**: Low-latency mesh WebRTC calling with Simple-Peer & Socket.IO.
-- 🗣️ **Continuous Speech Recognition**: Real-time voice detection with language selection and auto-reconnecting sessions.
+- 🗣️ **Continuous Speech Recognition (STT)**: Real-time voice detection with language selection and auto-reconnecting sessions.
 - 🌐 **AI Live Subtitles & Translation**: Multi-tier zero-latency translation engine supporting 25+ languages (Telugu, Hindi, Tamil, Spanish, English, French, German, Japanese, etc.).
 - 🔊 **Neural Text-To-Speech (TTS)**: Natural voice read-aloud for incoming translations using Deep Learning Neural voice models.
+- 📱 **Cross-Platform Flutter Mobile App**: Native iOS and Android mobile app located in [`flutter_app/`](file:///c:/Users/asmit/Downloads/APPP/flutter_app) with WebRTC video calling, real-time STT speech recognition, and neural TTS readout.
 - 📝 **Live Transcript Drawer**: Real-time conversation transcript history with search, clipboard copy, and `.txt` file export.
-- 📱 **Multi-Device & Local Network Support**: Test across mobile phones and PCs on the same Wi-Fi/LAN via HTTPS.
 - 🎨 **Modern Dark Glassmorphism UI**: Sleek, responsive interface with floating subtitle badges and call controls.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 18, Vite, Simple-Peer, Socket.IO Client, Vanilla CSS Modules
+- **Mobile App**: Flutter, Dart, `flutter_webrtc`, `socket_io_client`, `speech_to_text`, `flutter_tts`, `audioplayers`
+- **Web Frontend**: React 18, Vite, Simple-Peer, Socket.IO Client, Vanilla CSS Modules
 - **Backend**: Node.js, Express, Socket.IO, Edge Neural TTS, dotenv, CORS, UUID
 - **Signaling & Media**: WebSockets & WebRTC
 - **Hosting & CI/CD**: Vercel (Frontend), Render (Backend), GitHub Actions
