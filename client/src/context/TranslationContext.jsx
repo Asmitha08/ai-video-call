@@ -91,7 +91,7 @@ export function TranslationProvider({ children }) {
   const [myLanguage, setMyLanguage] = useState('en'); // spoken source language (en, te, hi, es, ta)
   const [targetLanguage, setTargetLanguage] = useState('te'); // subtitle & TTS target language (default: Telugu)
   const [speakTranslations, setSpeakTranslations] = useState(true); // TTS voice read-aloud
-  const [hearSelfTranslation, setHearSelfTranslation] = useState(false); // Default to false to eliminate mic-to-speaker feedback loop
+  const [hearSelfTranslation, setHearSelfTranslation] = useState(true); // Default to true so user hears own translation
   const [isTranscribing, setIsTranscribing] = useState(false);
 
   // Live subtitles on screen: socketId -> { displayName, originalText, translatedText, sourceLang, targetLang, isFinal, timestamp }
@@ -323,6 +323,28 @@ export function TranslationProvider({ children }) {
         lastTtsSpokenPhrasesRef.current.shift();
       }
 
+      // Ensure the text is strictly in the chosen target language!
+      // If targetCode is non-Latin (e.g. te, hi, ta, etc.) and cleanText is Latin (English),
+      // auto-translate to targetCode so the voice NEVER reads raw English words!
+      let textToSpeak = cleanText;
+      if (targetCode !== 'en') {
+        const isNonLatinTarget = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(targetCode);
+        const isInputLatin = !/[^\x00-\x7F]/.test(cleanText);
+        if (isNonLatinTarget && isInputLatin) {
+          try {
+            const offlineT = translateOffline(cleanText, 'en', targetCode);
+            if (offlineT && offlineT !== cleanText && /[^\x00-\x7F]/.test(offlineT)) {
+              textToSpeak = offlineT;
+            } else if (typeof navigator !== 'undefined' && navigator.onLine && translateRef.current) {
+              const onlineT = await translateRef.current(cleanText, 'en', targetCode);
+              if (onlineT && onlineT.trim()) {
+                textToSpeak = onlineT.trim();
+              }
+            }
+          } catch {}
+        }
+      }
+
       // ── Helper to execute on-device browser SpeechSynthesis with clean phonetic fallback ──
       const playOnDeviceSpeech = () => {
         if (!('speechSynthesis' in window)) return;
@@ -364,7 +386,7 @@ export function TranslationProvider({ children }) {
 
           if (!matchedVoice) return;
 
-          const utterance = new SpeechSynthesisUtterance(cleanText);
+          const utterance = new SpeechSynthesisUtterance(textToSpeak);
           utterance.lang = matchedVoice.lang || bcp47;
           utterance.rate = 1.0;
           utterance.volume = 1.0;
@@ -406,7 +428,7 @@ export function TranslationProvider({ children }) {
           try {
             const res = await new Promise((resolve, reject) => {
               const timeout = setTimeout(() => reject(new Error('timeout')), 4500);
-              socket.emit('caption:tts', { text: cleanText, targetLang: targetCode }, (resp) => {
+              socket.emit('caption:tts', { text: textToSpeak, targetLang: targetCode }, (resp) => {
                 clearTimeout(timeout);
                 if (resp?.audioBase64) resolve(resp);
                 else reject(new Error(resp?.error || 'no neural audio'));
@@ -426,7 +448,7 @@ export function TranslationProvider({ children }) {
             const res = await fetch('/api/tts', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text: cleanText, targetLang: targetCode }),
+              body: JSON.stringify({ text: textToSpeak, targetLang: targetCode }),
               signal: controller.signal,
             });
             clearTimeout(timeoutId);

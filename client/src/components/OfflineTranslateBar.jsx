@@ -273,7 +273,7 @@ export default function OfflineTranslateBar() {
                   })
                   .map(([enKey, map]) => {
                     const srcText = map[myLanguage] || map.en || enKey;
-                    const tgtText = map[targetLanguage] || map.en || enKey;
+                    const tgtText = map[targetLanguage] || translateOffline(srcText, myLanguage, targetLanguage) || map.en || enKey;
                     return (
                       <div key={enKey} className={styles.datasetItem}>
                         <div className={styles.datasetTextCol}>
@@ -331,7 +331,7 @@ export default function OfflineTranslateBar() {
                   })
                   .map(([enWord, map]) => {
                     const srcText = map[myLanguage] || map.en || enWord;
-                    const tgtText = map[targetLanguage] || map.en || enWord;
+                    const tgtText = map[targetLanguage] || translateOffline(srcText, myLanguage, targetLanguage) || map.en || enWord;
                     return (
                       <div key={enWord} className={styles.datasetItem}>
                         <div className={styles.datasetTextCol}>

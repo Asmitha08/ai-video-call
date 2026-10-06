@@ -1,4 +1,5 @@
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
+import { translateText } from './translationService.js';
 
 /**
  * Deep Learning Neural Text-To-Speech (TTS) Service.
@@ -49,7 +50,29 @@ export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
   const cleanLang = (targetLang ? targetLang.toLowerCase().trim() : 'en');
   const baseLang = cleanLang.split('-')[0];
   const voiceName = NEURAL_VOICE_MAP[cleanLang] || NEURAL_VOICE_MAP[baseLang] || 'en-US-JennyNeural';
-  const cacheKey = `${voiceName}:${text.trim()}`;
+
+  let textToSynthesize = text.trim();
+
+  // If target language is non-Latin (e.g. Telugu, Hindi, Tamil, Russian, etc.),
+  // but the input text contains only Latin/English letters:
+  // Automatically translate the text to the target language before generating speech!
+  if (baseLang !== 'en') {
+    const isNonLatinTarget = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(baseLang);
+    const isInputLatin = !/[^\x00-\x7F]/.test(textToSynthesize);
+    if (isNonLatinTarget && isInputLatin) {
+      try {
+        const translated = await translateText(textToSynthesize, 'en', baseLang);
+        if (translated && translated.trim() && /[^\x00-\x7F]/.test(translated)) {
+          textToSynthesize = translated.trim();
+          console.log(`[tts] auto-translated "${text.trim()}" -> "${textToSynthesize}" (${baseLang}) before synthesis`);
+        }
+      } catch (err) {
+        console.warn('[tts] pre-synthesis translation error:', err.message);
+      }
+    }
+  }
+
+  const cacheKey = `${voiceName}:${textToSynthesize}`;
 
   if (ttsAudioCache.has(cacheKey)) {
     return ttsAudioCache.get(cacheKey);
@@ -59,7 +82,7 @@ export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
   try {
     const tts = new MsEdgeTTS();
     await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    const { audioStream } = tts.toStream(text.trim());
+    const { audioStream } = tts.toStream(textToSynthesize);
 
     const chunks = [];
     const buffer = await new Promise((resolve, reject) => {
