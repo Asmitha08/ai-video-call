@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useTranslation } from '../context/TranslationContext.jsx';
 import { DATASET_PHRASES, DATASET_VOCABULARY, OFFLINE_CATEGORIES, RESEARCH_BENCHMARKS } from '../lib/offlineDataset.js';
-import { DATASET_STATS, translateOffline } from '../lib/offlineTranslator.js';
+import { DATASET_STATS, translateOffline, getPhoneticFallback } from '../lib/offlineTranslator.js';
+import { WavRecorder, blobToBase64 } from '../lib/wavRecorder.js';
 import styles from './OfflineTranslateBar.module.css';
 
 export default function OfflineTranslateBar() {
@@ -25,6 +26,105 @@ export default function OfflineTranslateBar() {
   const [showDatasetModal, setShowDatasetModal] = useState(false);
   const [datasetSearch, setDatasetSearch] = useState('');
   const [modalTab, setModalTab] = useState('sentences'); // 'sentences' | 'vocab' | 'research'
+
+  // Offline Voice Recognition (STT) states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState('');
+  const [recognizedResult, setRecognizedResult] = useState(null);
+  const recorderRef = useRef(null);
+  const stopTimerRef = useRef(null);
+
+  // Stop recording and send audio to local offline STT service
+  async function stopVoiceRecording() {
+    if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+    if (!recorderRef.current) return;
+
+    setIsRecording(false);
+    setRecordingStatus('⚡ Transcribing speech offline...');
+
+    try {
+      const blob = recorderRef.current.stop();
+      recorderRef.current = null;
+
+      if (!blob || blob.size < 500) {
+        setRecordingStatus('No audio detected. Please speak closer to mic.');
+        setTimeout(() => setRecordingStatus(''), 3000);
+        return;
+      }
+
+      const base64 = await blobToBase64(blob);
+      const res = await fetch('/api/stt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          audioBase64: base64,
+          mimeType: 'audio/wav',
+          sourceLang: myLanguage,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`STT server returned ${res.status}`);
+      }
+
+      const data = await res.json();
+      const rawText = data?.transcript ? data.transcript.trim() : '';
+
+      if (!rawText) {
+        setRecordingStatus('No speech recognized. Try speaking louder or closer to mic.');
+        setTimeout(() => setRecordingStatus(''), 3500);
+        return;
+      }
+
+      setRecordingStatus('');
+      setInputVal(rawText);
+
+      // Translate offline
+      const tgt = translateOffline(rawText, myLanguage, targetLanguage);
+      const pho = getPhoneticFallback(tgt, targetLanguage);
+      setRecognizedResult({
+        original: rawText,
+        translated: tgt,
+        phonetic: pho,
+      });
+
+      // Send caption & speak out loud
+      handleSend(rawText);
+    } catch (err) {
+      console.warn('[OfflineTranslateBar:stt] failed:', err);
+      setRecordingStatus('Recognition error: ' + err.message);
+      setTimeout(() => setRecordingStatus(''), 3500);
+    }
+  }
+
+  // Toggle voice recording (Start / Stop)
+  async function handleToggleVoiceRecord() {
+    if (isRecording) {
+      await stopVoiceRecording();
+      return;
+    }
+
+    try {
+      unlockTTS();
+      setRecognizedResult(null);
+      setRecordingStatus('🎙️ Listening... Speak now (e.g. "eighty nine")');
+
+      const recorder = new WavRecorder();
+      await recorder.start();
+      recorderRef.current = recorder;
+      setIsRecording(true);
+
+      // Auto-stop after 3.8s of speech capture
+      stopTimerRef.current = setTimeout(() => {
+        stopVoiceRecording();
+      }, 3800);
+    } catch (err) {
+      console.warn('[OfflineTranslateBar:mic] error starting recorder:', err);
+      setRecordingStatus('Microphone error: ' + err.message);
+      setIsRecording(false);
+      setTimeout(() => setRecordingStatus(''), 3500);
+    }
+  }
 
 
   // Extract phrases based on selected category
@@ -167,7 +267,7 @@ export default function OfflineTranslateBar() {
                 })}
               </div>
 
-              {/* Custom translation input bar */}
+              {/* Custom translation input bar with Offline Speech Recognition (STT) */}
               <form
                 className={styles.formRow}
                 onSubmit={(e) => {
@@ -183,15 +283,54 @@ export default function OfflineTranslateBar() {
                   value={inputVal}
                   onChange={(e) => setInputVal(e.target.value)}
                 />
+
+                <button
+                  id="btn-offline-speech-record"
+                  type="button"
+                  className={`${styles.micBtn} ${isRecording ? styles.micBtnRecording : ''}`}
+                  onClick={handleToggleVoiceRecord}
+                  title={isRecording ? 'Click to stop recording' : 'Record voice in offline mode (e.g., speak "eighty nine")'}
+                >
+                  {isRecording ? '🔴 Listening...' : '🎙️ Voice Input'}
+                </button>
+
                 <button
                   id="btn-offline-translate-submit"
                   type="submit"
                   className={styles.submitBtn}
-                  disabled={!inputVal.trim()}
+                  disabled={!inputVal.trim() || isRecording}
                 >
                   ➔ Translate &amp; Speak
                 </button>
               </form>
+
+              {/* Offline Voice Recognition Status & Live Output */}
+              {recordingStatus && (
+                <div className={styles.voiceStatusRow}>
+                  <span>{recordingStatus}</span>
+                </div>
+              )}
+
+              {recognizedResult && !recordingStatus && (
+                <div className={styles.voiceStatusRow}>
+                  <div className={styles.voiceResultChip}>
+                    <span className={styles.voiceResultOriginal}>🎙️ &ldquo;{recognizedResult.original}&rdquo;</span>
+                    <span>➔</span>
+                    <span>{recognizedResult.translated}</span>
+                    {recognizedResult.phonetic && (
+                      <span className={styles.voiceResultPhonetic}>[{recognizedResult.phonetic}]</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.voiceCloseBtn}
+                    onClick={() => setRecognizedResult(null)}
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

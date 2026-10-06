@@ -10,6 +10,7 @@ import { socket } from '../lib/socket.js';
 import { useCall } from './CallContext.jsx';
 import { SUPPORTED_LANGUAGES, getLanguageByCode } from '../lib/languages.js';
 import { translateOffline, getPhoneticFallback } from '../lib/offlineTranslator.js';
+import { WavRecorder, blobToBase64 } from '../lib/wavRecorder.js';
 
 // Common acoustic noise, breathing, throat clearing, and non-speech filler tokens
 const NOISE_TOKENS = new Set([
@@ -621,18 +622,133 @@ export function TranslationProvider({ children }) {
     let restartTimer = null;
     let isStarting = false;
 
+    // Offline continuous recognition states
+    let offlineRecorder = null;
+    let offlineLoopTimer = null;
+    let isOfflineRunning = false;
+
     if (!captionsEnabled || isAudioMuted || !room) {
       setIsTranscribing(false);
       return;
     }
 
+    async function startOfflineAudioLoop() {
+      if (isStopped || isOfflineRunning) return;
+      isOfflineRunning = true;
+      setIsTranscribing(true);
+      setSttError(null);
+      console.log('[speech:offline] Starting local offline microphone recognition loop...');
+
+      try {
+        offlineRecorder = new WavRecorder();
+        await offlineRecorder.start(localStream);
+
+        const recordCycle = async () => {
+          if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
+            if (offlineRecorder) {
+              try { offlineRecorder.stop(); } catch {}
+              offlineRecorder = null;
+            }
+            isOfflineRunning = false;
+            setIsTranscribing(false);
+            return;
+          }
+
+          let blob = null;
+          try {
+            blob = offlineRecorder.stop();
+          } catch {}
+          offlineRecorder = null;
+
+          if (blob && blob.size > 800) {
+            try {
+              const base64 = await blobToBase64(blob);
+              const currentMyLang = (myLangRef.current || 'en').split('-')[0];
+              const currentTargetLang = targetLangRef.current || 'te';
+              const activeSocketId = socket.id || 'local';
+              const currentRoom = roomRef.current;
+
+              const res = await fetch('/api/stt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  audioBase64: base64,
+                  mimeType: 'audio/wav',
+                  sourceLang: currentMyLang,
+                }),
+              });
+
+              if (res.ok) {
+                const data = await res.json();
+                const text = data?.transcript ? data.transcript.trim() : '';
+
+                if (text && !isNoiseOrGibberish(text, 1.0, currentMyLang)) {
+                  console.log('[speech:offline] Recognized offline transcript:', text);
+                  const fastTranslation = translateSync(text, currentMyLang, currentTargetLang);
+
+                  if (updateCaptionRef.current) {
+                    updateCaptionRef.current({
+                      socketId: activeSocketId,
+                      displayName: currentRoom?.displayName || 'You',
+                      originalText: text,
+                      translatedText: fastTranslation,
+                      sourceLang: currentMyLang,
+                      targetLang: currentTargetLang,
+                      isFinal: true,
+                    });
+                  }
+
+                  socket.emit('caption:speak', {
+                    text,
+                    sourceLang: currentMyLang,
+                    isFinal: true,
+                    displayName: currentRoom?.displayName || 'You',
+                  });
+                }
+              }
+            } catch (err) {
+              console.warn('[speech:offline] processing error:', err.message);
+            }
+          }
+
+          // Restart recorder for next cycle
+          if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
+            try {
+              offlineRecorder = new WavRecorder();
+              await offlineRecorder.start(localStream);
+              offlineLoopTimer = setTimeout(recordCycle, 3200);
+            } catch (recErr) {
+              console.warn('[speech:offline] loop restart error:', recErr);
+              isOfflineRunning = false;
+            }
+          } else {
+            isOfflineRunning = false;
+            setIsTranscribing(false);
+          }
+        };
+
+        offlineLoopTimer = setTimeout(recordCycle, 3200);
+      } catch (err) {
+        console.warn('[speech:offline] mic recorder error:', err);
+        isOfflineRunning = false;
+        setSttError('Microphone error: ' + err.message);
+      }
+    }
+
     if (!SpeechRecognition) {
-      setSttError('Speech recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.');
-      return;
+      console.log('[speech] Web Speech API not present, using Offline Audio Recognizer...');
+      startOfflineAudioLoop();
+      return () => {
+        isStopped = true;
+        if (offlineLoopTimer) clearTimeout(offlineLoopTimer);
+        if (offlineRecorder) {
+          try { offlineRecorder.stop(); } catch {}
+        }
+      };
     }
 
     function startSession() {
-      if (isStopped || isStarting) return;
+      if (isStopped || isStarting || isOfflineRunning) return;
       isStarting = true;
 
       try {
@@ -784,21 +900,28 @@ export function TranslationProvider({ children }) {
           } else if (e.error === 'audio-capture') {
             setSttError('No microphone detected. Please check your microphone connection.');
           } else if (e.error === 'network') {
-            setSttError('Offline mode: Desktop Chrome requires internet for voice recognition. Use the Offline Quick-Translate bar below to translate & speak in all 25 languages offline!');
+            // When browser speech recognition encounters network error in offline mode,
+            // seamlessly fall back to local offline speech recognizer engine!
+            console.log('[speech:recognition] Offline network error detected. Switching to local offline SAPI recognizer...');
+            try {
+              recognition.abort();
+            } catch {}
+            activeSession = null;
+            startOfflineAudioLoop();
           }
         };
 
         recognition.onend = () => {
           isStarting = false;
-          if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
-            setIsTranscribing(false);
+          if (isOfflineRunning || isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
+            if (!isOfflineRunning) setIsTranscribing(false);
             return;
           }
 
           // Restart session smoothly with fresh instance
           if (restartTimer) clearTimeout(restartTimer);
           restartTimer = setTimeout(() => {
-            if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
+            if (!isStopped && !isOfflineRunning && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
               startSession();
             }
           }, 250);
@@ -811,8 +934,8 @@ export function TranslationProvider({ children }) {
         isStarting = false;
         console.warn('[speech:session] start error:', err);
         if (!isStopped) {
-          if (restartTimer) clearTimeout(restartTimer);
-          restartTimer = setTimeout(startSession, 1000);
+          // Fall back to offline audio loop if recognition throws
+          startOfflineAudioLoop();
         }
       }
     }
@@ -823,6 +946,10 @@ export function TranslationProvider({ children }) {
       isStopped = true;
       isStarting = false;
       if (restartTimer) clearTimeout(restartTimer);
+      if (offlineLoopTimer) clearTimeout(offlineLoopTimer);
+      if (offlineRecorder) {
+        try { offlineRecorder.stop(); } catch {}
+      }
       if (activeSession) {
         try {
           activeSession.onend = null;

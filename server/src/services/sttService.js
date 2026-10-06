@@ -114,5 +114,16 @@ export async function transcribeAudio(audioBuffer, mimeType = 'audio/webm', sour
     console.warn('[stt:wit] failed:', err.message);
   }
 
+  // ── 4. Offline Desktop Recognizer (100% Offline / Zero-Cloud) ────────────
+  try {
+    const { transcribeOfflineWav } = await import('./offlineStt.js');
+    const offlineResult = await transcribeOfflineWav(audioBuffer, sourceLang);
+    if (offlineResult && offlineResult.trim()) {
+      return offlineResult.trim();
+    }
+  } catch (err) {
+    console.warn('[stt:offline] failed:', err.message);
+  }
+
   return '';
 }
