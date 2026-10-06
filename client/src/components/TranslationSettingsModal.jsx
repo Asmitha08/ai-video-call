@@ -9,8 +9,12 @@ export default function TranslationSettingsModal({ isOpen, onClose }) {
     setTargetLanguage,
     speakTranslations,
     setSpeakTranslations,
+    hearSelfTranslation,
+    setHearSelfTranslation,
     captionsEnabled,
     toggleCaptions,
+    unlockTTS,
+    testVoice,
     supportedLanguages,
   } = useTranslation();
 
@@ -97,9 +101,33 @@ export default function TranslationSettingsModal({ isOpen, onClose }) {
 
           {/* Target Language (Translation) */}
           <div className={styles.settingGroup}>
-            <label className={styles.fieldLabel} htmlFor="select-target-lang">
-              🎯 Translate incoming subtitles to:
-            </label>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label className={styles.fieldLabel} htmlFor="select-target-lang">
+                🎯 Translate incoming subtitles to:
+              </label>
+              <button
+                type="button"
+                style={{
+                  background: 'rgba(139, 92, 246, 0.25)',
+                  color: '#c4b5fd',
+                  border: '1px solid rgba(139, 92, 246, 0.5)',
+                  borderRadius: '6px',
+                  padding: '0.2rem 0.6rem',
+                  fontSize: '0.74rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                }}
+                onClick={() => {
+                  unlockTTS();
+                  testVoice(targetLanguage);
+                }}
+              >
+                🔊 Test Voice
+              </button>
+            </div>
             <select
               id="select-target-lang"
               className={styles.select}
@@ -150,6 +178,24 @@ export default function TranslationSettingsModal({ isOpen, onClose }) {
                 type="checkbox"
                 checked={speakTranslations}
                 onChange={(e) => setSpeakTranslations(e.target.checked)}
+              />
+              <span className={styles.slider} />
+            </label>
+          </div>
+
+          {/* Hear Self Translation (Solo Mode) */}
+          <div className={styles.toggleRow}>
+            <div className={styles.toggleInfo}>
+              <span className={styles.label}>🎧 Hear My Own Translation</span>
+              <span className={styles.desc}>
+                Hear translated voice playback for what you say (perfect for solo testing & demos).
+              </span>
+            </div>
+            <label className={styles.switch}>
+              <input
+                type="checkbox"
+                checked={hearSelfTranslation}
+                onChange={(e) => setHearSelfTranslation(e.target.checked)}
               />
               <span className={styles.slider} />
             </label>

@@ -29,3 +29,8 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Python & Temporary Scratch
+__pycache__/
+*.pyc
+scratch/

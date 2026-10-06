@@ -9,6 +9,103 @@ import {
 import { socket } from '../lib/socket.js';
 import { useCall } from './CallContext.jsx';
 import { SUPPORTED_LANGUAGES, getLanguageByCode } from '../lib/languages.js';
+import { translateOffline, getPhoneticFallback } from '../lib/offlineTranslator.js';
+
+// Common acoustic noise, breathing, throat clearing, and non-speech filler tokens
+const NOISE_TOKENS = new Set([
+  'uh', 'um', 'umm', 'uhh', 'ah', 'ahh', 'eh', 'er', 'oh', 'hmm', 'hm', 'hmmm',
+  'shh', 'shhh', 'sh', 'psst', 'ha', 'haha', 'tsk', 'grunt', 'cough', 'snort',
+  'gasp', 'sigh', 'click', 'clicks', 'clack', 'tick', 'buzz', 'static', 'beep',
+  'woosh', 'throat', 'inaudible', 'applause', 'music', 'laughter', 'noise',
+  'coughing', 'mhm', 'mm', 'mmm', 'mm-hmm', 'uh-huh', 'huh', 'ooh', 'whoa',
+  'pfft', 'pff', 'brr', 'ach', 'oops'
+]);
+
+/**
+ * Validates whether a recognized sound is actual human speech or background noise/artifact.
+ */
+function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
+  if (!rawText) return true;
+  const text = rawText.trim();
+  if (!text) return true;
+
+  // 1. Confidence threshold: Chrome emits confidence < 0.40 for ambient noise/clicks
+  if (confidence > 0 && confidence < 0.42) {
+    return true;
+  }
+
+  // 2. Bracketed sound effect markers like [Music], [Laughter], (inaudible)
+  if (/^[(\[][a-zA-Z\s]+[)\]]$/.test(text)) {
+    return true;
+  }
+
+  // Normalize punctuation and whitespace
+  const clean = text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"'…]/g, '').trim();
+  if (!clean) return true;
+
+  // 3. Acoustic noise filler check
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+
+  // If every word in the utterance is an acoustic filler/noise token
+  if (words.every((w) => NOISE_TOKENS.has(w))) {
+    return true;
+  }
+
+  // 4. Repeated character gibberish (e.g., "shhhh", "ssss", "zzzzz", "kkkkk")
+  if (/(.)\1{3,}/.test(clean)) {
+    return true;
+  }
+
+  // 5. Isolated single consonant or acoustic pop in Latin languages
+  const baseLang = (lang || 'en').split('-')[0].toLowerCase();
+  const latinLangs = ['en', 'es', 'fr', 'de', 'pt', 'it', 'nl', 'tr', 'vi', 'id'];
+
+  if (latinLangs.includes(baseLang)) {
+    if (words.length === 1) {
+      const single = words[0];
+      // Single character in Latin script is only valid if 'a', 'i', 'y', 'o'
+      if (single.length === 1 && !['a', 'i', 'y', 'o'].includes(single)) {
+        return true;
+      }
+      // Two-character consonant clusters with no vowels e.g. "th", "sh", "ck", "st", "ps"
+      if (single.length === 2 && !/[aeiouy]/.test(single)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Regional voice fallbacks for offline devices where regional voice packages may not be pre-installed
+const REGIONAL_VOICE_FALLBACKS = {
+  te: ['te-IN', 'hi-IN', 'en-IN', 'ta-IN', 'kn-IN', 'mr-IN', 'bn-IN'],
+  hi: ['hi-IN', 'en-IN', 'te-IN', 'ta-IN'],
+  ta: ['ta-IN', 'hi-IN', 'en-IN', 'te-IN'],
+  kn: ['kn-IN', 'hi-IN', 'en-IN', 'te-IN'],
+  ml: ['ml-IN', 'hi-IN', 'en-IN', 'ta-IN'],
+  mr: ['mr-IN', 'hi-IN', 'en-IN'],
+  bn: ['bn-IN', 'hi-IN', 'en-IN'],
+  gu: ['gu-IN', 'hi-IN', 'en-IN'],
+  pa: ['pa-IN', 'hi-IN', 'en-IN'],
+  es: ['es-ES', 'es-MX', 'es-US', 'pt-BR', 'it-IT'],
+  pt: ['pt-BR', 'pt-PT', 'es-ES'],
+  it: ['it-IT', 'es-ES', 'fr-FR'],
+  fr: ['fr-FR', 'fr-CA', 'es-ES'],
+  de: ['de-DE', 'de-AT', 'nl-NL', 'en-US'],
+  nl: ['nl-NL', 'de-DE', 'en-US'],
+  zh: ['zh-CN', 'zh-TW', 'zh-HK'],
+  ja: ['ja-JP'],
+  ko: ['ko-KR'],
+  ru: ['ru-RU'],
+  ar: ['ar-SA', 'ar-EG'],
+  tr: ['tr-TR'],
+  vi: ['vi-VN'],
+  th: ['th-TH'],
+  id: ['id-ID', 'ms-MY'],
+  en: ['en-US', 'en-GB', 'en-IN', 'en-AU']
+};
 
 const TranslationContext = createContext(null);
 
@@ -20,6 +117,7 @@ export function TranslationProvider({ children }) {
   const [myLanguage, setMyLanguage] = useState('en'); // spoken source language (en, te, hi, es, ta)
   const [targetLanguage, setTargetLanguage] = useState('te'); // subtitle & TTS target language (default: Telugu)
   const [speakTranslations, setSpeakTranslations] = useState(true); // TTS voice read-aloud
+  const [hearSelfTranslation, setHearSelfTranslation] = useState(true); // Hear own translation in solo / test mode
   const [isTranscribing, setIsTranscribing] = useState(false);
 
   // Live subtitles on screen: socketId -> { displayName, originalText, translatedText, sourceLang, targetLang, isFinal, timestamp }
@@ -35,8 +133,15 @@ export function TranslationProvider({ children }) {
   const isListeningRef = useRef(false);
   const clientTranslationCache = useRef(new Map());
   const synthVoicesRef = useRef([]);
+  const activeUtteranceRef = useRef(null);
+  const lastSpokenRef = useRef({ text: '', time: 0 });
+  const lastFinalTranscriptRef = useRef({ text: '', time: 0 });
+  const lastTtsEndTimeRef = useRef(0);
+  const lastTtsSpokenPhrasesRef = useRef([]);
+  const hearSelfTranslationRef = useRef(hearSelfTranslation);
+  hearSelfTranslationRef.current = hearSelfTranslation;
 
-  // Pre-load synthesis voices for TTS
+  // Pre-load synthesis voices for TTS and auto-unlock on user interaction
   useEffect(() => {
     if ('speechSynthesis' in window) {
       const loadVoices = () => {
@@ -45,9 +150,44 @@ export function TranslationProvider({ children }) {
       loadVoices();
       window.speechSynthesis.onvoiceschanged = loadVoices;
     }
+
+    const unlockAudio = () => {
+      if ('speechSynthesis' in window) {
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        } catch {}
+      }
+    };
+
+    window.addEventListener('click', unlockAudio, { passive: true });
+    window.addEventListener('touchstart', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
+
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
   }, []);
 
-  // ── Bulletproof Multi-Tier Translation Helper ────────────────────────────
+  // ── Synchronous Instant Translation Lookup (0ms latency) ─────────────────
+  const translateSync = useCallback((text, sourceLang, targetLang) => {
+    if (!text || !text.trim()) return '';
+    const cleanText = text.trim();
+    const s = (sourceLang || 'en').split('-')[0].toLowerCase();
+    const t = (targetLang || 'te').split('-')[0].toLowerCase();
+    if (s === t && s !== 'auto') return cleanText;
+
+    const cacheKey = `${s}->${t}:${cleanText.toLowerCase()}`;
+    if (clientTranslationCache.current.has(cacheKey)) {
+      return clientTranslationCache.current.get(cacheKey);
+    }
+
+    const offline = translateOffline(cleanText, s, t);
+    return offline || cleanText;
+  }, []);
+
+  // ── Bulletproof Offline-First Fast Translation Helper ───────────────────
   const translate = useCallback(
     async (text, sourceLang, targetLang) => {
       if (!text || !text.trim()) return '';
@@ -62,11 +202,22 @@ export function TranslationProvider({ children }) {
         return clientTranslationCache.current.get(cacheKey);
       }
 
-      // Tier 1: Socket.IO Server Translation (if connected)
+      // Check offline dictionary match first
+      const offlineMatch = translateOffline(cleanText, sLang, tLang);
+      if (offlineMatch && offlineMatch.toLowerCase() !== cleanText.toLowerCase()) {
+        clientTranslationCache.current.set(cacheKey, offlineMatch);
+      }
+
+      // If user is completely offline, return immediately in 0ms!
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return offlineMatch || cleanText;
+      }
+
+      // Tier 1: Socket.IO Server Translation (if connected) with fast 1s timeout
       if (socket.connected) {
         try {
           const translated = await new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error('socket timeout')), 3000);
+            const timer = setTimeout(() => reject(new Error('socket timeout')), 1200);
             socket.emit(
               'caption:translate',
               { text: cleanText, sourceLang: sLang, targetLang: tLang },
@@ -89,13 +240,17 @@ export function TranslationProvider({ children }) {
         }
       }
 
-      // Tier 2: Backend REST API (/api/translate)
+      // Tier 2: Backend REST API (/api/translate) with 1s timeout
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
         const res = await fetch('/api/translate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: cleanText, sourceLang: sLang, targetLang: tLang }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
           if (data.translatedText && data.translatedText.trim()) {
@@ -110,10 +265,13 @@ export function TranslationProvider({ children }) {
 
       // Tier 3: Direct Browser Google Clients5 Translation Endpoint
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
         const gUrl = `https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${encodeURIComponent(
           sLang
         )}&tl=${encodeURIComponent(tLang)}&q=${encodeURIComponent(cleanText)}`;
-        const gRes = await fetch(gUrl);
+        const gRes = await fetch(gUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (gRes.ok) {
           const gData = await gRes.json();
           if (Array.isArray(gData) && gData[0]) {
@@ -134,54 +292,10 @@ export function TranslationProvider({ children }) {
         console.warn('[translate:clients5-direct] fallback:', err.message);
       }
 
-      // Tier 4: Direct Browser Single Endpoint with dict-chrome-ex
-      try {
-        const sUrl = `https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl=${encodeURIComponent(
-          sLang
-        )}&tl=${encodeURIComponent(tLang)}&dt=t&q=${encodeURIComponent(cleanText)}`;
-        const sRes = await fetch(sUrl);
-        if (sRes.ok) {
-          const sData = await sRes.json();
-          if (Array.isArray(sData) && Array.isArray(sData[0])) {
-            const translated = sData[0]
-              .map((item) => (item && item[0] ? item[0] : ''))
-              .join('')
-              .trim();
-            if (translated) {
-              clientTranslationCache.current.set(cacheKey, translated);
-              return translated;
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('[translate:googleapis-direct] fallback:', err.message);
-      }
-
-      // Tier 5: Direct Browser MyMemory Free API Fallback
-      try {
-        const sl = sLang === 'auto' ? 'en' : sLang;
-        const mUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
-          cleanText
-        )}&langpair=${encodeURIComponent(sl)}|${encodeURIComponent(tLang)}`;
-        const mRes = await fetch(mUrl);
-        if (mRes.ok) {
-          const mData = await mRes.json();
-          let translated = mData?.responseData?.translatedText;
-          if ((!translated || !translated.trim()) && Array.isArray(mData?.matches)) {
-            const validMatch = mData.matches.find((m) => m && m.translation && m.translation.trim());
-            if (validMatch) translated = validMatch.translation;
-          }
-          if (translated && translated.trim()) {
-            const resText = translated.trim();
-            clientTranslationCache.current.set(cacheKey, resText);
-            return resText;
-          }
-        }
-      } catch (err) {
-        console.warn('[translate:mymemory-direct] failed:', err.message);
-      }
-
-      return cleanText;
+      // Tier 4: Direct Offline Fallback (0ms, 100% offline)
+      const fallbackResult = offlineMatch || cleanText;
+      clientTranslationCache.current.set(cacheKey, fallbackResult);
+      return fallbackResult;
     },
     []
   );
@@ -200,69 +314,219 @@ export function TranslationProvider({ children }) {
 
   const activeAudioRef = useRef(null);
 
-  // ── Text-to-Speech (TTS) Voice Synthesis (Deep Learning Neural TTS) ─────────
+  // ── Text-to-Speech (TTS) Voice Synthesis Engine (25 Languages Offline-Ready) ─
   const speakText = useCallback(
     async (text, langCode) => {
       if (!speakTranslations || !text || !text.trim()) return;
+      const cleanText = text.trim();
       const targetCode = (langCode || targetLanguage || 'en').split('-')[0].toLowerCase();
 
-      // 1. Try Deep Learning Neural TTS from server
-      try {
-        const audioData = await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('timeout')), 3000);
-          socket.emit('caption:tts', { text: text.trim(), targetLang: targetCode }, (res) => {
-            clearTimeout(timeout);
-            if (res?.audioBase64) resolve(res);
-            else reject(new Error(res?.error || 'no neural audio'));
-          });
-        });
+      // Prevent immediate duplicate re-speaking within 2.5 seconds
+      const now = Date.now();
+      if (lastSpokenRef.current.text === cleanText && now - lastSpokenRef.current.time < 2500) {
+        return;
+      }
+      lastSpokenRef.current = { text: cleanText, time: now };
 
-        if (audioData?.audioBase64) {
-          if (activeAudioRef.current) {
-            try { activeAudioRef.current.pause(); } catch {}
-          }
-          const audio = new Audio(`data:${audioData.mimeType || 'audio/mp3'};base64,${audioData.audioBase64}`);
-          audio.volume = 1.0;
-          activeAudioRef.current = audio;
-          await audio.play();
-          console.log(`[tts:neural] playing voice (${audioData.voice})`);
-          return;
-        }
-      } catch (err) {
-        console.warn('[tts:neural] falling back to browser synthesis:', err.message);
+      // Ensure audio synthesis context is active
+      if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+        try { window.speechSynthesis.resume(); } catch {}
       }
 
-      // 2. Fallback to browser SpeechSynthesis
-      if ('speechSynthesis' in window) {
+      // Record spoken phrase for echo loop suppression
+      lastTtsSpokenPhrasesRef.current.push(cleanText.toLowerCase());
+      if (lastTtsSpokenPhrasesRef.current.length > 8) {
+        lastTtsSpokenPhrasesRef.current.shift();
+      }
+
+      // ── Helper to execute on-device browser SpeechSynthesis with full fallbacks ──
+      const playOnDeviceSpeech = () => {
+        if (!('speechSynthesis' in window)) return;
         try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
           window.speechSynthesis.cancel();
+
           const targetLangObj = getLanguageByCode(targetCode);
           const bcp47 = targetLangObj.bcp47 || 'en-US';
-
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.lang = bcp47;
-          utterance.rate = 1.0;
-          utterance.volume = 1.0;
 
           const voices = synthVoicesRef.current.length
             ? synthVoicesRef.current
             : window.speechSynthesis.getVoices();
 
-          const matchedVoice = voices.find(
-            (v) => v.lang.toLowerCase() === bcp47.toLowerCase() || v.lang.startsWith(targetCode)
-          );
-          if (matchedVoice) {
-            utterance.voice = matchedVoice;
+          // 1. Exact BCP-47 match
+          let matchedVoice = voices.find((v) => v.lang.toLowerCase() === bcp47.toLowerCase());
+
+          // 2. Language prefix match
+          if (!matchedVoice) {
+            matchedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(targetCode));
           }
 
+          // 3. Voice name match
+          if (!matchedVoice && targetLangObj.name) {
+            const simpleName = targetLangObj.name.split(' ')[0].toLowerCase();
+            matchedVoice = voices.find((v) => v.name.toLowerCase().includes(simpleName));
+          }
+
+          // 4. Regional family fallback (e.g. for te, ta, kn -> check hi-IN or en-IN)
+          if (!matchedVoice && REGIONAL_VOICE_FALLBACKS[targetCode]) {
+            for (const fb of REGIONAL_VOICE_FALLBACKS[targetCode]) {
+              matchedVoice = voices.find(
+                (v) =>
+                  v.lang.toLowerCase() === fb.toLowerCase() ||
+                  v.lang.toLowerCase().startsWith(fb.split('-')[0].toLowerCase())
+              );
+              if (matchedVoice) break;
+            }
+          }
+
+          // 5. Default voice
+          if (!matchedVoice && voices.length > 0) {
+            matchedVoice = voices.find((v) => v.default) || voices[0];
+          }
+
+          // Detect if voice is English/Latin while text is Indic/Asian script
+          const isNonLatinScript = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(targetCode);
+          const isVoiceLatinOnly = matchedVoice && (matchedVoice.lang.toLowerCase().startsWith('en') || matchedVoice.lang.toLowerCase().startsWith('es'));
+
+          let textToSpeak = cleanText;
+          if (isNonLatinScript && isVoiceLatinOnly) {
+            const phonetic = getPhoneticFallback(cleanText, targetCode);
+            if (phonetic) textToSpeak = phonetic;
+          }
+
+          const utterance = new SpeechSynthesisUtterance(textToSpeak);
+          utterance.lang = matchedVoice ? matchedVoice.lang : bcp47;
+          utterance.rate = 1.0;
+          utterance.volume = 1.0;
+          if (matchedVoice) utterance.voice = matchedVoice;
+
+          utterance.onstart = () => {
+            lastTtsEndTimeRef.current = Date.now() + 8000;
+          };
+          utterance.onend = () => {
+            activeUtteranceRef.current = null;
+            lastTtsEndTimeRef.current = Date.now();
+          };
+          utterance.onerror = (e) => {
+            console.warn('[tts:speechSynthesis] error, trying phonetic recovery:', e.error);
+            activeUtteranceRef.current = null;
+            lastTtsEndTimeRef.current = Date.now();
+
+            // Auto-recovery if voice rejected script: try phonetic transliteration with default voice
+            if (e.error === 'language-unavailable' || e.error === 'synthesis-failed') {
+              try {
+                const recoveryText = getPhoneticFallback(cleanText, targetCode) || cleanText;
+                const recoveryUtterance = new SpeechSynthesisUtterance(recoveryText);
+                recoveryUtterance.lang = 'en-US';
+                recoveryUtterance.rate = 0.95;
+                window.speechSynthesis.speak(recoveryUtterance);
+              } catch {}
+            }
+          };
+
+          activeUtteranceRef.current = utterance;
           window.speechSynthesis.speak(utterance);
         } catch (synthErr) {
-          console.warn('[tts:synth] error:', synthErr);
+          console.warn('[tts:synth] fatal error:', synthErr);
         }
+      };
+
+      // 1. If offline, immediately use browser on-device speech synthesis (0 network delay)
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        playOnDeviceSpeech();
+        return;
       }
+
+      // 2. Try Deep Learning Neural TTS from server (if online and connected)
+      try {
+        let audioBase64 = null;
+        let mimeType = 'audio/mp3';
+        let voice = null;
+
+        if (socket.connected) {
+          try {
+            const res = await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('timeout')), 1200);
+              socket.emit('caption:tts', { text: cleanText, targetLang: targetCode }, (resp) => {
+                clearTimeout(timeout);
+                if (resp?.audioBase64) resolve(resp);
+                else reject(new Error(resp?.error || 'no neural audio'));
+              });
+            });
+            audioBase64 = res?.audioBase64;
+            mimeType = res?.mimeType || 'audio/mp3';
+            voice = res?.voice;
+          } catch {}
+        }
+
+        if (audioBase64) {
+          if (activeAudioRef.current) {
+            try {
+              activeAudioRef.current.pause();
+              activeAudioRef.current.currentTime = 0;
+            } catch {}
+          }
+          const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+          audio.volume = 1.0;
+          activeAudioRef.current = audio;
+
+          audio.onplay = () => {
+            lastTtsEndTimeRef.current = Date.now() + 8000;
+          };
+          audio.onended = () => {
+            lastTtsEndTimeRef.current = Date.now();
+          };
+          audio.onerror = () => {
+            lastTtsEndTimeRef.current = Date.now();
+          };
+
+          await audio.play();
+          console.log(`[tts:neural] playing voice (${voice})`);
+          return;
+        }
+      } catch (err) {
+        console.warn('[tts:neural] falling back to on-device synthesis:', err.message);
+      }
+
+      // 3. Fallback to on-device SpeechSynthesis (100% Offline-Safe)
+      playOnDeviceSpeech();
     },
     [speakTranslations, targetLanguage]
   );
+
+  // ── Voice test helper (All 25 Languages) ───────────────────────────────────
+  const testVoice = useCallback((customLang) => {
+    const code = (customLang || targetLanguage || 'en').split('-')[0].toLowerCase();
+    const samplePhrases = {
+      en: 'Hello! This is live AI neural translation voice.',
+      te: 'నమస్కారం! ఇది ప్రత్యక్ష ఏఐ వాయిస్ అనువాదం.',
+      hi: 'नमस्ते! यह लाइव एआई वॉयस अनुवाद है।',
+      ta: 'வணக்கம்! இது நேரடி AI குரல் மொழிபெயர்ப்பு.',
+      kn: 'ನಮಸ್ಕಾರ! ಇದು ಲೈವ್ ಎಐ ಧ್ವನಿ ಅನುವಾದ.',
+      ml: 'നമസ്കാരം! ഇത് ലൈവ് എഐ വോയ്‌സ് വിവർത്തനമാണ്.',
+      mr: 'नमस्कार! हे थेट एआय व्हॉइस भाषांतर आहे.',
+      bn: 'নমস্কার! এটি লাইভ এআই ভয়েস অনুবাদ।',
+      gu: 'નમસ્તે! આ લાઈવ એઆઈ વોઈસ અનુવાદ છે.',
+      pa: 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ! ਇਹ ਲਾਈਵ ਏਆਈ ਆਵਾਜ਼ ਅਨੁਵਾਦ ਹੈ।',
+      es: '¡Hola! Esta es la traducción de voz con IA en tiempo real.',
+      fr: 'Bonjour! Ceci est la traduction vocale IA en direct.',
+      de: 'Hallo! Dies ist die Live-KI-Sprachübersetzung.',
+      zh: '你好！这是实时AI语音翻译。',
+      ja: 'こんにちは！これはリアルタイムAI音声翻訳です。',
+      ko: '안녕하세요! 실시간 AI 음성 번역입니다.',
+      pt: 'Olá! Esta é a tradução de voz por IA em tempo real.',
+      it: 'Ciao! Questa è la traduzione vocale AI in tempo reale.',
+      ru: 'Здравствуйте! Это голосовой перевод на базе ИИ в реальном времени.',
+      ar: 'مرحبا! هذه ترجمة صوتية بالذكاء الاصطناعي في الوقت الفعلي.',
+      nl: 'Hallo! Dit is de live AI-stemvertaling.',
+      tr: 'Merhaba! Bu canlı yapay zeka sesli çevirisidir.',
+      vi: 'Xin chào! Đây là bản dịch giọng nói AI trực tiếp.',
+      th: 'สวัสดี! นี่คือการแปลเสียง AI แบบเรียลไทม์',
+      id: 'Halo! Ini adalah terjemahan suara AI langsung.'
+    };
+    const sample = samplePhrases[code] || `Hello! AI translation voice is active for ${code}.`;
+    speakText(sample, code);
+  }, [speakText, targetLanguage]);
 
   // ── Push / update live subtitle (Persistent 12s duration) ─────────────────
   const updateCaption = useCallback(
@@ -314,7 +578,8 @@ export function TranslationProvider({ children }) {
         setTranscriptHistory((prev) => [...prev, entry]);
 
         // Speak incoming translated speech out loud via TTS
-        if (socketId !== socket.id) {
+        const isSelf = socketId === socket.id || socketId === 'local';
+        if (!isSelf || hearSelfTranslationRef.current) {
           speakText(translatedText || originalText, targetLang);
         }
       }
@@ -354,6 +619,7 @@ export function TranslationProvider({ children }) {
     let activeSession = null;
     let isStopped = false;
     let restartTimer = null;
+    let isStarting = false;
 
     if (!captionsEnabled || isAudioMuted || !room) {
       setIsTranscribing(false);
@@ -366,13 +632,15 @@ export function TranslationProvider({ children }) {
     }
 
     function startSession() {
-      if (isStopped) return;
+      if (isStopped || isStarting) return;
+      isStarting = true;
 
       try {
         if (activeSession) {
           try {
             activeSession.onend = null;
             activeSession.onerror = null;
+            activeSession.onresult = null;
             activeSession.abort();
           } catch {}
           activeSession = null;
@@ -386,6 +654,7 @@ export function TranslationProvider({ children }) {
         recognition.lang = langObj.bcp47 || 'en-US';
 
         recognition.onstart = () => {
+          isStarting = false;
           if (!isStopped) {
             setIsTranscribing(true);
             setSttError(null);
@@ -396,16 +665,40 @@ export function TranslationProvider({ children }) {
         recognition.onresult = async (event) => {
           if (isStopped || isAudioMutedRef.current || !captionsEnabledRef.current) return;
 
+          const currentMyLang = (myLangRef.current || 'en').split('-')[0];
+          const currentTargetLang = targetLangRef.current || 'te';
+          const currentRoom = roomRef.current;
+          const activeSocketId = socket.id || 'local';
+
+          // Echo suppression: check if TTS is playing through laptop speakers
+          const isTtsSpeakingNow =
+            (window.speechSynthesis && window.speechSynthesis.speaking) ||
+            (activeAudioRef.current && !activeAudioRef.current.paused) ||
+            Date.now() - lastTtsEndTimeRef.current < 750;
+
           let interim = '';
           let finalTranscript = '';
 
-          for (let i = 0; i < event.results.length; ++i) {
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
             const item = event.results[i];
             if (item && item[0]) {
+              const rawChunk = (item[0].transcript || '').trim();
+              const confidence = typeof item[0].confidence === 'number' ? item[0].confidence : 1.0;
+
+              // Filter out background noise, static, breaths, clicks, or gibberish
+              if (isNoiseOrGibberish(rawChunk, confidence, currentMyLang)) {
+                continue;
+              }
+
+              // Filter out speaker loopback during active TTS
+              if (isTtsSpeakingNow && confidence < 0.65) {
+                continue;
+              }
+
               if (item.isFinal) {
-                finalTranscript += item[0].transcript + ' ';
+                finalTranscript += rawChunk + ' ';
               } else {
-                interim += item[0].transcript;
+                interim += rawChunk;
               }
             }
           }
@@ -413,13 +706,45 @@ export function TranslationProvider({ children }) {
           const activeText = (finalTranscript || interim).trim();
           if (!activeText) return;
 
-          const isFinal = Boolean(finalTranscript.trim());
-          const currentMyLang = (myLangRef.current || 'en').split('-')[0];
-          const currentTargetLang = targetLangRef.current || 'te';
-          const currentRoom = roomRef.current;
-          const activeSocketId = socket.id || 'local';
+          // Secondary noise and length validation
+          if (isNoiseOrGibberish(activeText, 1.0, currentMyLang)) return;
+          if (activeText.length < 2 && !['a', 'i', 'y', 'o', '我', '你', '好'].includes(activeText.toLowerCase())) {
+            return;
+          }
 
-          // Broadcast to all participants in the room
+          // Discard speaker acoustic loopback if phrase matches recently spoken TTS
+          const isEcho = lastTtsSpokenPhrasesRef.current.some(
+            (spoken) => spoken.includes(activeText.toLowerCase()) || activeText.toLowerCase().includes(spoken)
+          );
+          if (isEcho && (isTtsSpeakingNow || Date.now() - lastTtsEndTimeRef.current < 2500)) {
+            return;
+          }
+
+          const isFinal = Boolean(finalTranscript.trim());
+
+          // Prevent rapid duplicate repeats of the exact same final sentence
+          const now = Date.now();
+          if (isFinal) {
+            if (lastFinalTranscriptRef.current.text === activeText && now - lastFinalTranscriptRef.current.time < 2200) {
+              return;
+            }
+            lastFinalTranscriptRef.current = { text: activeText, time: now };
+          }
+
+          const fastTranslation = translateSync(activeText, currentMyLang, currentTargetLang);
+
+          if (updateCaptionRef.current) {
+            updateCaptionRef.current({
+              socketId: activeSocketId,
+              displayName: currentRoom?.displayName || 'You',
+              originalText: activeText,
+              translatedText: fastTranslation,
+              sourceLang: currentMyLang,
+              targetLang: currentTargetLang,
+              isFinal,
+            });
+          }
+
           socket.emit('caption:speak', {
             text: activeText,
             sourceLang: currentMyLang,
@@ -427,23 +752,27 @@ export function TranslationProvider({ children }) {
             displayName: currentRoom?.displayName || 'You',
           });
 
-          // Translate for local subtitle view
-          const translated = await translateRef.current(activeText, currentMyLang, currentTargetLang);
-
-          if (updateCaptionRef.current) {
-            updateCaptionRef.current({
-              socketId: activeSocketId,
-              displayName: currentRoom?.displayName || 'You',
-              originalText: activeText,
-              translatedText: translated,
-              sourceLang: currentMyLang,
-              targetLang: currentTargetLang,
-              isFinal,
-            });
+          if (isFinal && typeof navigator !== 'undefined' && navigator.onLine) {
+            translateRef.current(activeText, currentMyLang, currentTargetLang)
+              .then((enriched) => {
+                if (enriched && enriched !== fastTranslation && updateCaptionRef.current) {
+                  updateCaptionRef.current({
+                    socketId: activeSocketId,
+                    displayName: currentRoom?.displayName || 'You',
+                    originalText: activeText,
+                    translatedText: enriched,
+                    sourceLang: currentMyLang,
+                    targetLang: currentTargetLang,
+                    isFinal: true,
+                  });
+                }
+              })
+              .catch(() => {});
           }
         };
 
         recognition.onerror = (e) => {
+          isStarting = false;
           if (e.error === 'no-speech' || e.error === 'aborted') {
             return;
           }
@@ -455,11 +784,12 @@ export function TranslationProvider({ children }) {
           } else if (e.error === 'audio-capture') {
             setSttError('No microphone detected. Please check your microphone connection.');
           } else if (e.error === 'network') {
-            console.warn('[speech:recognition] network blip, restarting...');
+            setSttError('Offline mode: Desktop Chrome requires internet for voice recognition. Use the Offline Quick-Translate bar below to translate & speak in all 25 languages offline!');
           }
         };
 
         recognition.onend = () => {
+          isStarting = false;
           if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
             setIsTranscribing(false);
             return;
@@ -471,14 +801,15 @@ export function TranslationProvider({ children }) {
             if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
               startSession();
             }
-          }, 300);
+          }, 250);
         };
 
         recognition.start();
         activeSession = recognition;
         recognitionRef.current = recognition;
       } catch (err) {
-        console.warn('[speech:session] failed to start:', err);
+        isStarting = false;
+        console.warn('[speech:session] start error:', err);
         if (!isStopped) {
           if (restartTimer) clearTimeout(restartTimer);
           restartTimer = setTimeout(startSession, 1000);
@@ -490,11 +821,13 @@ export function TranslationProvider({ children }) {
 
     return () => {
       isStopped = true;
+      isStarting = false;
       if (restartTimer) clearTimeout(restartTimer);
       if (activeSession) {
         try {
           activeSession.onend = null;
           activeSession.onerror = null;
+          activeSession.onresult = null;
           activeSession.abort();
         } catch {}
       }
@@ -515,18 +848,34 @@ export function TranslationProvider({ children }) {
       const activeText = originalText || text;
       if (!captionsEnabled || !activeText) return;
 
-      // Translate the incoming text in real time
-      const translated = await translate(activeText, sourceLang, targetLanguage);
+      // Translate the incoming text in real time with instant offline fallback
+      const fastTranslated = translateSync(activeText, sourceLang, targetLanguage);
 
       updateCaption({
         socketId: fromSocketId,
         displayName: displayName || 'Participant',
         originalText: activeText,
-        translatedText: translated,
+        translatedText: fastTranslated,
         sourceLang,
         targetLang: targetLanguage,
         isFinal: isFinal ?? true,
       });
+
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        translate(activeText, sourceLang, targetLanguage).then((enriched) => {
+          if (enriched && enriched !== fastTranslated) {
+            updateCaption({
+              socketId: fromSocketId,
+              displayName: displayName || 'Participant',
+              originalText: activeText,
+              translatedText: enriched,
+              sourceLang,
+              targetLang: targetLanguage,
+              isFinal: true,
+            });
+          }
+        }).catch(() => {});
+      }
     };
 
     socket.on('caption:receive', handleRemoteCaption);
@@ -534,9 +883,9 @@ export function TranslationProvider({ children }) {
     return () => {
       socket.off('caption:receive', handleRemoteCaption);
     };
-  }, [captionsEnabled, targetLanguage, translate, updateCaption]);
+  }, [captionsEnabled, targetLanguage, translate, translateSync, updateCaption]);
 
-  // ── Manual Caption / Chat ─────────────────────────────────────────────────
+  // ── Manual Caption / Chat (Instant 0ms Offline Translation) ───────────────
   const sendManualCaption = useCallback(
     async (text) => {
       if (!text || !text.trim()) return;
@@ -552,23 +901,42 @@ export function TranslationProvider({ children }) {
         displayName: room?.displayName || 'You',
       });
 
-      const translated = await translate(clean, myLangCode, targetLanguage);
+      // Synchronous offline instant translation (0ms)
+      const fastTranslation = translateSync(clean, myLangCode, targetLanguage);
 
       updateCaption({
         socketId: activeSocketId,
         displayName: room?.displayName || 'You',
         originalText: clean,
-        translatedText: translated,
+        translatedText: fastTranslation,
         sourceLang: myLangCode,
         targetLang: targetLanguage,
         isFinal: true,
       });
+
+      // Asynchronous online enrichment if internet is available
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        translate(clean, myLangCode, targetLanguage).then((enriched) => {
+          if (enriched && enriched !== fastTranslation) {
+            updateCaption({
+              socketId: activeSocketId,
+              displayName: room?.displayName || 'You',
+              originalText: clean,
+              translatedText: enriched,
+              sourceLang: myLangCode,
+              targetLang: targetLanguage,
+              isFinal: true,
+            });
+          }
+        }).catch(() => {});
+      }
     },
-    [myLanguage, targetLanguage, room?.displayName, translate, updateCaption]
+    [myLanguage, targetLanguage, room?.displayName, translate, translateSync, updateCaption]
   );
 
   const toggleCaptions = () => setCaptionsEnabled((prev) => !prev);
   const toggleSpeakTranslations = () => setSpeakTranslations((prev) => !prev);
+  const toggleHearSelfTranslation = () => setHearSelfTranslation((prev) => !prev);
   const clearTranscript = () => setTranscriptHistory([]);
 
   const value = {
@@ -582,6 +950,9 @@ export function TranslationProvider({ children }) {
     speakTranslations,
     setSpeakTranslations,
     toggleSpeakTranslations,
+    hearSelfTranslation,
+    setHearSelfTranslation,
+    toggleHearSelfTranslation,
     isTranscribing,
     sttError,
     sendManualCaption,
@@ -589,6 +960,7 @@ export function TranslationProvider({ children }) {
     transcriptHistory,
     clearTranscript,
     speakText,
+    testVoice,
     supportedLanguages: SUPPORTED_LANGUAGES,
     myLanguageObj: getLanguageByCode(myLanguage),
     targetLanguageObj: getLanguageByCode(targetLanguage),

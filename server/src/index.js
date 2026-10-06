@@ -13,20 +13,13 @@ import { transcribeAudio } from './services/sttService.js';
 const app = express();
 const httpServer = createServer(app);
 
-// ── CORS ───────────────────────────────────────────────────────────────────────
-const allowedOrigins = process.env.CLIENT_ORIGIN
-  ? (process.env.CLIENT_ORIGIN === '*' ? true : process.env.CLIENT_ORIGIN.split(',').map(s => s.trim()))
-  : [
-      /^https?:\/\/localhost(:\d+)?$/,
-      /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-      /^https?:\/\/192\.168\.\d+\.\d+(:\d+)?$/,   // LAN
-      /^https?:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,    // LAN (10.x)
-      /^https?:\/\/172\.(1[6-9]|2\d|3[01])\.\d+\.\d+(:\d+)?$/,  // LAN (172.x)
-      /https:\/\/.*\.vercel\.app$/,               // Vercel apps
-    ];
-
+// ── CORS (Permissive for Offline LAN, Local WiFi Hotspot & WebRTC) ───────────
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or same-origin)
+    if (!origin) return callback(null, true);
+    return callback(null, true);
+  },
   credentials: true,
 };
 

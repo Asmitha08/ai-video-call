@@ -10,25 +10,20 @@ import styles from './LiveCaptionsOverlay.module.css';
  * - Line 2: Translated Subtitle (Prominently displayed below)
  */
 export default function LiveCaptionsOverlay({ targetSocketId }) {
-  const { liveCaptions, captionsEnabled, targetLanguage } = useTranslation();
+  const { liveCaptions, captionsEnabled, targetLanguage, speakText, unlockTTS } = useTranslation();
 
   if (!captionsEnabled) return null;
 
   let caption = null;
-  if (targetSocketId) {
-    caption =
-      liveCaptions[targetSocketId] ||
-      (socket?.id && targetSocketId === socket.id ? liveCaptions['local'] : null) ||
-      (targetSocketId === 'local' && socket?.id ? liveCaptions[socket.id] : null) ||
-      (targetSocketId === 'local' ? liveCaptions['local'] : null);
-
-    if (!caption && (targetSocketId === 'local' || (socket?.id && targetSocketId === socket.id))) {
-      caption = liveCaptions['local'] || (socket?.id ? liveCaptions[socket.id] : null);
-    }
+  if (targetSocketId && liveCaptions[targetSocketId]) {
+    caption = liveCaptions[targetSocketId];
+  } else if (liveCaptions['local']) {
+    caption = liveCaptions['local'];
+  } else if (socket?.id && liveCaptions[socket.id]) {
+    caption = liveCaptions[socket.id];
   }
-  
+
   if (!caption) {
-    // Global mode / resilient fallback: pick the most recent active caption
     const entries = Object.values(liveCaptions);
     if (entries.length > 0) {
       caption = entries.sort((a, b) => b.timestamp - a.timestamp)[0];
@@ -52,15 +47,41 @@ export default function LiveCaptionsOverlay({ targetSocketId }) {
             {caption.displayName}
             {!caption.isFinal && <span className={styles.liveTag}>LIVE</span>}
           </span>
-          <span className={styles.langPill}>
-            {sourceLangObj.flag} {sourceLangObj.name}
-            {isDifferentLang && (
-              <>
-                <span className={styles.arrow}>➔</span>
-                {targetLangObj.flag} {targetLangObj.name}
-              </>
-            )}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span className={styles.langPill}>
+              {sourceLangObj.flag} {sourceLangObj.name}
+              {isDifferentLang && (
+                <>
+                  <span className={styles.arrow}>➔</span>
+                  {targetLangObj.flag} {targetLangObj.name}
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              title="Speak translation aloud"
+              style={{
+                background: 'rgba(139, 92, 246, 0.25)',
+                color: '#e9d5ff',
+                border: '1px solid rgba(139, 92, 246, 0.4)',
+                borderRadius: '6px',
+                padding: '0.15rem 0.4rem',
+                fontSize: '0.75rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.2rem',
+                pointerEvents: 'auto',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                unlockTTS();
+                speakText(caption.translatedText || caption.originalText, caption.targetLang || targetLanguage);
+              }}
+            >
+              🔊
+            </button>
+          </div>
         </div>
 
         {/* ── Line 1: Original Spoken Transcript ──────────────────────────────── */}

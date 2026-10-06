@@ -9,6 +9,8 @@ export default function TranscriptDrawer({ isOpen, onClose }) {
     clearTranscript,
     targetLanguage,
     sendManualCaption,
+    speakText,
+    unlockTTS,
   } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [messageText, setMessageText] = useState('');
@@ -155,6 +157,25 @@ export default function TranscriptDrawer({ isOpen, onClose }) {
                       {sLang.flag} {sLang.code.toUpperCase()}
                       {isTranslated && ` ➔ ${tLang.flag} ${tLang.code.toUpperCase()}`}
                     </span>
+                    <button
+                      type="button"
+                      title="Speak translated text aloud"
+                      style={{
+                        background: 'rgba(139, 92, 246, 0.2)',
+                        border: '1px solid rgba(139, 92, 246, 0.4)',
+                        borderRadius: '4px',
+                        color: '#c4b5fd',
+                        padding: '0.1rem 0.35rem',
+                        fontSize: '0.72rem',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => {
+                        unlockTTS();
+                        speakText(item.translatedText || item.originalText, item.targetLang || targetLanguage);
+                      }}
+                    >
+                      🔊
+                    </button>
                     <span className={styles.entryTime}>{time}</span>
                   </div>
                 </div>

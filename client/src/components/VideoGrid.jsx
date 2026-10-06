@@ -171,23 +171,28 @@ function InvitePanel({ roomId }) {
         <span className={styles.waitingIcon}>👥</span>
       </div>
 
-      <p className={styles.waitingText}>You're the only one here</p>
+      <p className={styles.waitingText}>You're in the meeting room</p>
 
-      {/* ── Localhost warning ─────────────────────────────────────────────── */}
-      {isLocalhost && (
-        <div className={styles.localhostWarning}>
-          <span className={styles.warnIcon}>⚠</span>
-          <span>
-            <strong>localhost links only work on your own machine.</strong><br />
-            Share the link below — it uses your network IP so others on the same WiFi can join.
-          </span>
-        </div>
-      )}
+      {/* Network / Offline Mode Indicator */}
+      <div style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.4rem',
+        background: 'rgba(34, 197, 94, 0.15)',
+        border: '1px solid rgba(34, 197, 94, 0.35)',
+        color: '#86efac',
+        fontSize: '0.78rem',
+        fontWeight: '600',
+        padding: '0.3rem 0.8rem',
+        borderRadius: '20px',
+        margin: '0.4rem 0',
+      }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+        {isLocalhost ? 'Local Offline / LAN Ready' : 'Online Room Ready'}
+      </div>
 
       <p className={styles.waitingHint}>
-        {isLocalhost
-          ? `Send this link (requires same Wi-Fi network):`
-          : `Send this link to invite others:`}
+        Share this meeting link or room code to invite others:
       </p>
 
       {/* Shareable link row */}
@@ -207,7 +212,7 @@ function InvitePanel({ roomId }) {
           onClick={copyLink}
           aria-label="Copy invite link"
         >
-          {copied ? '✓ Copied!' : '⎘ Copy'}
+          {copied ? '✓ Copied!' : '⎘ Copy Link'}
         </button>
       </div>
 

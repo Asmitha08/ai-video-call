@@ -6,6 +6,7 @@ import VideoGrid from '../components/VideoGrid.jsx';
 import CallControls from '../components/CallControls.jsx';
 import RoomInfo from '../components/RoomInfo.jsx';
 import ConnectionStatus from '../components/ConnectionStatus.jsx';
+import OfflineTranslateBar from '../components/OfflineTranslateBar.jsx';
 import LiveCaptionsOverlay from '../components/LiveCaptionsOverlay.jsx';
 import TranslationSettingsModal from '../components/TranslationSettingsModal.jsx';
 import TranscriptDrawer from '../components/TranscriptDrawer.jsx';
@@ -90,6 +91,9 @@ export default function CallPage() {
       <section className={styles.videoArea}>
         <VideoGrid />
       </section>
+
+      {/* ── Offline Instant Translation & Speech Bar ─────────────────────────── */}
+      <OfflineTranslateBar />
 
       {/* ── Floating Global Subtitles Banner ────────────────────────────────── */}
       <LiveCaptionsOverlay />

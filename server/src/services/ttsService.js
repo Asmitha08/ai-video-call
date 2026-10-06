@@ -5,7 +5,7 @@ import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
  * Generates natural human-like voice synthesis using Deep Learning Neural Vocoder models.
  */
 
-// Voice mapping for Edge Neural Models
+// Voice mapping for Edge Neural Models covering all 25 languages
 const NEURAL_VOICE_MAP = {
   te: 'te-IN-ShrutiNeural',      // Telugu (Female)
   'te-in': 'te-IN-ShrutiNeural',
@@ -22,6 +22,10 @@ const NEURAL_VOICE_MAP = {
   de: 'de-DE-KatjaNeural',       // German
   ja: 'ja-JP-NanamiNeural',      // Japanese
   zh: 'zh-CN-XiaoxiaoNeural',    // Chinese (Mandarin)
+  ko: 'ko-KR-SunHiNeural',       // Korean
+  pt: 'pt-BR-FranciscaNeural',   // Portuguese
+  it: 'it-IT-ElsaNeural',        // Italian
+  ru: 'ru-RU-SvetlanaNeural',    // Russian
   ar: 'ar-SA-ZariyahNeural',     // Arabic
   bn: 'bn-IN-TanishaaNeural',    // Bengali
   mr: 'mr-IN-AarohiNeural',      // Marathi
@@ -29,6 +33,11 @@ const NEURAL_VOICE_MAP = {
   ml: 'ml-IN-SobhanaNeural',     // Malayalam
   pa: 'pa-IN-OjasNeural',        // Punjabi
   gu: 'gu-IN-DhwaniNeural',      // Gujarati
+  nl: 'nl-NL-ColetteNeural',     // Dutch
+  tr: 'tr-TR-EmelNeural',        // Turkish
+  vi: 'vi-VN-HoaiMyNeural',      // Vietnamese
+  th: 'th-TH-PremwadeeNeural',   // Thai
+  id: 'id-ID-GadisNeural',       // Indonesian
 };
 
 export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
