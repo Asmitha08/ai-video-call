@@ -113,6 +113,7 @@ export function TranslationProvider({ children }) {
   const lastTtsEndTimeRef = useRef(0);
   const lastTtsSpokenPhrasesRef = useRef([]);
   const spokenUtteranceKeysRef = useRef(new Set());
+  const ttsSequenceRef = useRef(0);
   const hearSelfTranslationRef = useRef(hearSelfTranslation);
   hearSelfTranslationRef.current = hearSelfTranslation;
 
@@ -296,6 +297,9 @@ export function TranslationProvider({ children }) {
       const cleanText = text.trim();
       const targetCode = (langCode || targetLanguage || 'en').split('-')[0].toLowerCase();
 
+      // Concurrency Mutex: Sequence ID to drop stale asynchronous speech requests
+      const currentSeq = ++ttsSequenceRef.current;
+
       // Prevent immediate duplicate re-speaking within 2.5 seconds
       const now = Date.now();
       if (lastSpokenRef.current.text === cleanText && now - lastSpokenRef.current.time < 2500) {
@@ -307,7 +311,8 @@ export function TranslationProvider({ children }) {
       if (activeAudioRef.current) {
         try {
           activeAudioRef.current.pause();
-          activeAudioRef.current.currentTime = 0;
+          activeAudioRef.current.src = '';
+          activeAudioRef.current = null;
         } catch {}
       }
       if ('speechSynthesis' in window) {
@@ -348,6 +353,7 @@ export function TranslationProvider({ children }) {
       // ── Helper to execute on-device browser SpeechSynthesis with clean phonetic fallback ──
       const playOnDeviceSpeech = () => {
         if (!('speechSynthesis' in window)) return;
+        if (ttsSequenceRef.current !== currentSeq) return;
         try {
           if (window.speechSynthesis.paused) window.speechSynthesis.resume();
           window.speechSynthesis.cancel();
@@ -463,11 +469,18 @@ export function TranslationProvider({ children }) {
           } catch {}
         }
 
+        // If superseded by a newer speech turn, drop this stale audio immediately
+        if (ttsSequenceRef.current !== currentSeq) {
+          console.log('[tts] superseded by newer speech turn, discarding');
+          return;
+        }
+
         if (audioBase64) {
           if (activeAudioRef.current) {
             try {
               activeAudioRef.current.pause();
-              activeAudioRef.current.currentTime = 0;
+              activeAudioRef.current.src = '';
+              activeAudioRef.current = null;
             } catch {}
           }
           const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
@@ -478,9 +491,15 @@ export function TranslationProvider({ children }) {
             lastTtsEndTimeRef.current = Date.now() + 8000;
           };
           audio.onended = () => {
+            if (activeAudioRef.current === audio) {
+              activeAudioRef.current = null;
+            }
             lastTtsEndTimeRef.current = Date.now();
           };
           audio.onerror = () => {
+            if (activeAudioRef.current === audio) {
+              activeAudioRef.current = null;
+            }
             lastTtsEndTimeRef.current = Date.now();
           };
 
@@ -489,11 +508,13 @@ export function TranslationProvider({ children }) {
           return;
         }
       } catch (err) {
-        console.warn('[tts:neural] falling back to on-device synthesis:', err.message);
+        console.warn('[tts:neural] error:', err.message);
       }
 
-      // 3. Fallback to on-device SpeechSynthesis (100% Offline-Safe)
-      playOnDeviceSpeech();
+      // 3. Fallback to on-device SpeechSynthesis (100% Offline-Safe) if not superseded
+      if (ttsSequenceRef.current === currentSeq) {
+        playOnDeviceSpeech();
+      }
     },
     [speakTranslations, targetLanguage]
   );
@@ -534,7 +555,7 @@ export function TranslationProvider({ children }) {
 
   // ── Push / update live subtitle (Persistent 12s duration) ─────────────────
   const updateCaption = useCallback(
-    ({ socketId, displayName, originalText, translatedText, sourceLang, targetLang, isFinal }) => {
+    ({ socketId, displayName, originalText, translatedText, sourceLang, targetLang, isFinal, shouldSpeak }) => {
       const now = Date.now();
 
       setLiveCaptions((prev) => ({
@@ -586,31 +607,42 @@ export function TranslationProvider({ children }) {
         const isSelf = socketId === socket.id || socketId === 'local';
         const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
-        // Only commit to spoken if the text is in the target language (or user is completely offline)
-        if (!alreadySpoken && (isTranslated || isOffline)) {
+        // In online mode, ONLY speak when shouldSpeak is true (full online translation ready).
+        // In offline mode, speak immediately when final.
+        const canSpeak = shouldSpeak !== undefined ? Boolean(shouldSpeak) : isOffline;
+
+        if (!alreadySpoken && canSpeak && (isTranslated || isOffline)) {
           spokenUtteranceKeysRef.current.add(turnKey);
           if (spokenUtteranceKeysRef.current.size > 120) {
             const first = spokenUtteranceKeysRef.current.values().next().value;
             spokenUtteranceKeysRef.current.delete(first);
           }
 
-          const entry = {
-            id: `${socketId}-${now}`,
-            turnKey,
-            speakerId: socketId,
-            displayName,
-            originalText,
-            translatedText: translatedText || originalText,
-            sourceLang,
-            targetLang: tLangCode,
-            timestamp: now,
-          };
+          setTranscriptHistory((prev) => {
+            const exists = prev.some((item) => item.turnKey === turnKey);
+            if (exists) {
+              return prev.map((item) =>
+                item.turnKey === turnKey
+                  ? { ...item, translatedText: translatedText || originalText }
+                  : item
+              );
+            }
+            return [
+              ...prev,
+              {
+                id: `${socketId}-${now}`,
+                turnKey,
+                speakerId: socketId,
+                displayName,
+                originalText,
+                translatedText: translatedText || originalText,
+                sourceLang,
+                targetLang: tLangCode,
+                timestamp: now,
+              },
+            ];
+          });
 
-          setTranscriptHistory((prev) => [...prev, entry]);
-
-          // Only speak if:
-          // 1. Remote participant speech OR user explicitly enabled hearSelfTranslation
-          // 2. AND the text is strictly in the chosen target language
           if (!isSelf || hearSelfTranslationRef.current) {
             const speechContent = isTranslated ? translatedText : (isCrossLanguage ? null : originalText);
             if (speechContent && speechContent.trim()) {
@@ -618,19 +650,39 @@ export function TranslationProvider({ children }) {
             }
           }
         } else {
-          // If already spoken or was waiting for the true target language translation:
+          // Subtitle or interim history update while waiting for enriched translation
           if (translatedText) {
-            setTranscriptHistory((prev) =>
-              prev.map((item) =>
-                item.turnKey === turnKey ? { ...item, translatedText } : item
-              )
-            );
+            setTranscriptHistory((prev) => {
+              const exists = prev.some((item) => item.turnKey === turnKey);
+              if (exists) {
+                return prev.map((item) =>
+                  item.turnKey === turnKey ? { ...item, translatedText } : item
+                );
+              }
+              return [
+                ...prev,
+                {
+                  id: `${socketId}-${now}`,
+                  turnKey,
+                  speakerId: socketId,
+                  displayName,
+                  originalText,
+                  translatedText: translatedText || originalText,
+                  sourceLang,
+                  targetLang: tLangCode,
+                  timestamp: now,
+                },
+              ];
+            });
 
-            // If it was delayed waiting for the verified target language translation:
-            if (!alreadySpoken && isTranslated) {
+            // If it was delayed waiting for shouldSpeak: true (full online translation ready):
+            if (!alreadySpoken && canSpeak && (isTranslated || isOffline)) {
               spokenUtteranceKeysRef.current.add(turnKey);
               if (!isSelf || hearSelfTranslationRef.current) {
-                speakText(translatedText.trim(), tLangCode);
+                const speechContent = isTranslated ? translatedText : (isCrossLanguage ? null : originalText);
+                if (speechContent && speechContent.trim()) {
+                  speakText(speechContent.trim(), tLangCode);
+                }
               }
             }
           }
@@ -787,6 +839,7 @@ export function TranslationProvider({ children }) {
             lastFinalTranscriptRef.current = { text: activeText, time: now };
           }
 
+          const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
           const fastTranslation = translateSync(activeText, currentMyLang, currentTargetLang);
 
           if (updateCaptionRef.current) {
@@ -798,6 +851,7 @@ export function TranslationProvider({ children }) {
               sourceLang: currentMyLang,
               targetLang: currentTargetLang,
               isFinal,
+              shouldSpeak: isOfflineMode && isFinal,
             });
           }
 
@@ -811,19 +865,33 @@ export function TranslationProvider({ children }) {
           if (isFinal && typeof navigator !== 'undefined' && navigator.onLine) {
             translateRef.current(activeText, currentMyLang, currentTargetLang)
               .then((enriched) => {
-                if (enriched && updateCaptionRef.current) {
+                if (updateCaptionRef.current) {
                   updateCaptionRef.current({
                     socketId: activeSocketId,
                     displayName: currentRoom?.displayName || 'You',
                     originalText: activeText,
-                    translatedText: enriched,
+                    translatedText: enriched || fastTranslation,
                     sourceLang: currentMyLang,
                     targetLang: currentTargetLang,
                     isFinal: true,
+                    shouldSpeak: true,
                   });
                 }
               })
-              .catch(() => {});
+              .catch(() => {
+                if (updateCaptionRef.current) {
+                  updateCaptionRef.current({
+                    socketId: activeSocketId,
+                    displayName: currentRoom?.displayName || 'You',
+                    originalText: activeText,
+                    translatedText: fastTranslation,
+                    sourceLang: currentMyLang,
+                    targetLang: currentTargetLang,
+                    isFinal: true,
+                    shouldSpeak: true,
+                  });
+                }
+              });
           }
         };
 
@@ -904,6 +972,8 @@ export function TranslationProvider({ children }) {
       const activeText = originalText || text;
       if (!captionsEnabled || !activeText) return;
 
+      const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
       // Translate the incoming text in real time with instant offline fallback
       const fastTranslated = translateSync(activeText, sourceLang, targetLanguage);
 
@@ -915,22 +985,35 @@ export function TranslationProvider({ children }) {
         sourceLang,
         targetLang: targetLanguage,
         isFinal: isFinal ?? true,
+        shouldSpeak: isOfflineMode && (isFinal ?? true),
       });
 
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        translate(activeText, sourceLang, targetLanguage).then((enriched) => {
-          if (enriched) {
+        translate(activeText, sourceLang, targetLanguage)
+          .then((enriched) => {
             updateCaption({
               socketId: fromSocketId,
               displayName: displayName || 'Participant',
               originalText: activeText,
-              translatedText: enriched,
+              translatedText: enriched || fastTranslated,
               sourceLang,
               targetLang: targetLanguage,
               isFinal: true,
+              shouldSpeak: true,
             });
-          }
-        }).catch(() => {});
+          })
+          .catch(() => {
+            updateCaption({
+              socketId: fromSocketId,
+              displayName: displayName || 'Participant',
+              originalText: activeText,
+              translatedText: fastTranslated,
+              sourceLang,
+              targetLang: targetLanguage,
+              isFinal: true,
+              shouldSpeak: true,
+            });
+          });
       }
     };
 
@@ -957,6 +1040,8 @@ export function TranslationProvider({ children }) {
         displayName: room?.displayName || 'You',
       });
 
+      const isOfflineMode = typeof navigator !== 'undefined' && !navigator.onLine;
+
       // Synchronous offline instant translation (0ms)
       const fastTranslation = translateSync(clean, myLangCode, targetLanguage);
 
@@ -968,23 +1053,36 @@ export function TranslationProvider({ children }) {
         sourceLang: myLangCode,
         targetLang: targetLanguage,
         isFinal: true,
+        shouldSpeak: isOfflineMode,
       });
 
       // Asynchronous online enrichment if internet is available
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        translate(clean, myLangCode, targetLanguage).then((enriched) => {
-          if (enriched && enriched !== fastTranslation) {
+        translate(clean, myLangCode, targetLanguage)
+          .then((enriched) => {
             updateCaption({
               socketId: activeSocketId,
               displayName: room?.displayName || 'You',
               originalText: clean,
-              translatedText: enriched,
+              translatedText: enriched || fastTranslation,
               sourceLang: myLangCode,
               targetLang: targetLanguage,
               isFinal: true,
+              shouldSpeak: true,
             });
-          }
-        }).catch(() => {});
+          })
+          .catch(() => {
+            updateCaption({
+              socketId: activeSocketId,
+              displayName: room?.displayName || 'You',
+              originalText: clean,
+              translatedText: fastTranslation,
+              sourceLang: myLangCode,
+              targetLang: targetLanguage,
+              isFinal: true,
+              shouldSpeak: true,
+            });
+          });
       }
     },
     [myLanguage, targetLanguage, room?.displayName, translate, translateSync, updateCaption]

@@ -127,7 +127,7 @@ export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
         },
         body: JSON.stringify({
           model: 'tts-1',
-          input: text.trim(),
+          input: textToSynthesize.trim(),
           voice: 'alloy',
         }),
       });
