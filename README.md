@@ -1,117 +1,175 @@
-# 🌐 AICall — AI-Powered Video Calling & Live Translation
+# 🌐 AICall — Real-Time Multilingual Video Conferencing & Offline Speech Translation
 
-An AI-powered, real-time video calling application featuring peer-to-peer WebRTC video/audio streaming, Socket.IO signaling, and live multilingual speech-to-text translation and voice synthesis.
+[![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-black?logo=vercel)](https://vercel.com)
+[![Render Backend](https://img.shields.io/badge/Render-Online-46E3B7?logo=render)](https://ai-video-call-1.onrender.com)
+[![Flutter Mobile](https://img.shields.io/badge/Flutter-iOS%20%7C%20Android-02569B?logo=flutter)](https://flutter.dev)
+[![WebRTC](https://img.shields.io/badge/WebRTC-P2P%20Mesh-orange?logo=webrtc)](https://webrtc.org)
+[![Languages](https://img.shields.io/badge/Languages-25%20Supported-blue)](#-supported-languages-25-total--600-pairs)
+[![Offline Translation](https://img.shields.io/badge/Offline%20Engine-100%25%20Embedded-brightgreen)](#-embedded-offline-translation-engine)
+
+An enterprise-grade, peer-to-peer WebRTC video calling platform with **continuous multilingual Speech-to-Text (STT)**, **instant live subtitle translation**, **neural Text-to-Speech (TTS) voice dubbing**, and a **100% offline edge translation engine** operating with zero latency across 25 global and Indic languages.
 
 ---
 
 ## 🚀 Live Deployments
 
 - **Backend Signaling & Translation Server (Render)**: [`https://ai-video-call-1.onrender.com`](https://ai-video-call-1.onrender.com)
-- **Frontend Web Application (Vercel)**: Deployed on Vercel with automatic Render backend connection.
+- **Frontend Web Application (Vercel)**: Deployed with automatic fallback and edge-offline translation.
 - **GitHub Repository**: [`https://github.com/Asmitha08/ai-video-call`](https://github.com/Asmitha08/ai-video-call)
 
 ---
 
-## ✨ Features
+## ✨ Key Features
 
-- 📹 **P2P Video & Audio Calling**: Low-latency mesh WebRTC calling with Simple-Peer & Socket.IO.
-- 🗣️ **Continuous Speech Recognition (STT)**: Real-time voice detection with language selection and auto-reconnecting sessions.
-- 🌐 **AI Live Subtitles & Translation**: Multi-tier zero-latency translation engine supporting 25+ languages (Telugu, Hindi, Tamil, Spanish, English, French, German, Japanese, etc.).
-- 🔊 **Neural Text-To-Speech (TTS)**: Natural voice read-aloud for incoming translations using Deep Learning Neural voice models.
-- 📱 **Cross-Platform Flutter Mobile App**: Native iOS and Android mobile app located in [`flutter_app/`](file:///c:/Users/asmit/Downloads/APPP/flutter_app) with WebRTC video calling, real-time STT speech recognition, and neural TTS readout.
-- 📝 **Live Transcript Drawer**: Real-time conversation transcript history with search, clipboard copy, and `.txt` file export.
-- 🎨 **Modern Dark Glassmorphism UI**: Sleek, responsive interface with floating subtitle badges and call controls.
+### 1. ⚡ 100% Offline Edge Translation Engine (0 ms Latency)
+- **Zero Cloud Dependency**: Runs completely inside browser and mobile client memory without needing an internet connection.
+- **Embedded Research Datasets**: Curated from premier open NLP benchmarks:
+  - **Meta AI NLLB FLORES-200** (*Costa-jussà et al., Meta AI 2022*)
+  - **AI4Bharat IndicTrans** (*Ramesh et al., ACL 2022*)
+  - **Tatoeba Translation Project** (*Jörg Tiedemann, EAMT 2020*)
+  - **OPUS-100 Multilingual Corpus** (*Zhang et al., ACL 2020*)
+- **Deterministic Number Translation (0–1000)**: Translates compound spoken numbers (*e.g., "eighty-nine" $\rightarrow$ "ఎనభై తొమ్మిది"* in Telugu, *"नवासी"* in Hindi, *"ochenta y nueve"* in Spanish) and digit sequences (*"Call me at 89"*).
+- **Morphological Lemmatizer**: 146 irregular lemma rules handle verb inflections (*"speaking"* $\rightarrow$ *"speak"*, *"went"* $\rightarrow$ *"go"*), plurals (*"friends"* $\rightarrow$ *"friend"*), and adverbs (*"clearly"* $\rightarrow$ *"clear"*).
+- **Interactive Offline Translate Bar**: Floating dataset explorer tab featuring sentence and vocabulary lookups, category filtering, and direct audio synthesis.
+
+### 2. 🎙️ Continuous Real-Time Speech Recognition (STT)
+- Sub-second speech recognition with automatic session restart.
+- Background noise gating and echo loopback suppression (prevents laptop speakers from feeding into mic during TTS playback).
+- Voice confidence thresholding filters out breathing, clicks, static, and ambient noise.
+
+### 3. 🔊 Neural Text-To-Speech (TTS) & Universal Phonetic Fallback
+- **Cloud Neural Voice**: Deep learning neural vocoder models (MsEdgeTTS) produce natural, human-like voice readouts.
+- **Universal Phonetic Romanization Fallback**: If a client device lacks native Indic/Asian OS voice engines, the engine dynamically generates Romanized phonetic transcriptions (*e.g., 89 $\rightarrow$ "Enabhai Thommidi"*) so audio synthesis never fails silently.
+
+### 4. 📹 Low-Latency Peer-to-Peer Video Calling (WebRTC)
+- Direct encrypted mesh peer-to-peer audio and video streaming.
+- Dynamic layout grid with active speaker indicator and Picture-in-Picture (PiP) local stream preview.
+- Camera flip (front/back), audio mute/unmute, and screen-sharing support.
+
+### 5. 📱 Cross-Platform Flutter Mobile App (`flutter_app/`)
+- Native **Android & iOS** app built with Flutter 3.
+- Connects directly to the Render backend server worldwide over 4G/5G/Wi-Fi or over local LAN.
+- Features identical continuous STT, floating translated captions, and voice readouts.
+
+### 6. 📝 Live Transcript Drawer
+- Full chronological transcript history with speaker timestamps.
+- One-click copy to clipboard and `.txt` file export for meeting documentation.
 
 ---
 
-## 🛠️ Tech Stack
+## 🌍 Supported Languages (25 Total / 600 Pairs)
 
-- **Mobile App**: Flutter, Dart, `flutter_webrtc`, `socket_io_client`, `speech_to_text`, `flutter_tts`, `audioplayers`
-- **Web Frontend**: React 18, Vite, Simple-Peer, Socket.IO Client, Vanilla CSS Modules
-- **Backend**: Node.js, Express, Socket.IO, Edge Neural TTS, dotenv, CORS, UUID
-- **Signaling & Media**: WebSockets & WebRTC
-- **Hosting & CI/CD**: Vercel (Frontend), Render (Backend), GitHub Actions
+| Region | Languages Supported |
+|---|---|
+| **Indic Languages** | Telugu (te), Hindi (hi), Tamil (ta), Kannada (kn), Malayalam (ml), Marathi (mr), Bengali (bn), Gujarati (gu), Punjabi (pa) |
+| **European Languages** | English (en), Spanish (es), French (fr), German (de), Portuguese (pt), Italian (it), Dutch (nl), Russian (ru) |
+| **Asian Languages** | Chinese (zh), Japanese (ja), Korean (ko), Vietnamese (vi), Thai (th), Indonesian (id) |
+| **Middle Eastern** | Arabic (ar), Turkish (tr) |
 
 ---
 
-## 🚀 Getting Started Locally
+## 🏗️ Architecture & Technology Stack
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/Asmitha08/ai-video-call.git
-cd ai-video-call
+```
+                          ┌─────────────────────────────┐
+                          │     Client Applications     │
+                          │   React (Web) / Flutter     │
+                          └──────────────┬──────────────┘
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    ▼                                         ▼
+        [100% Offline Path]                               [Online Path]
+    • Embedded Parallel Corpus                    • WebRTC Signaling (Socket.IO)
+    • 233-Word Lexicon + Lemmatizer               • MsEdgeTTS Neural Vocoder
+    • 0–1000 Compound Numeral Engine              • Google Clients5 Fallback
+    • Romanized Phonetic Audio Fallback           • Cloud REST API (/api/translate)
 ```
 
-### 2. Install Dependencies
-```bash
-npm run install:all
+- **Frontend Web**: React 18, Vite, Simple-Peer, Socket.IO Client, Vanilla CSS Modules.
+- **Mobile Client**: Flutter 3 (Dart), `flutter_webrtc`, `socket_io_client`, `speech_to_text`, `flutter_tts`.
+- **Backend Signaling**: Node.js, Express, Socket.IO 4, `msedge-tts`, UUID, CORS.
+- **Deployment**: Vercel (Frontend), Render (Signaling & Neural TTS Backend).
+
+---
+
+## 📂 Repository Structure
+
 ```
-
-### 3. Environment Variables
-Create `.env` files in both `client` and `server` folders using the provided `.env.example` templates:
-
-**Server (`server/.env`):**
-```env
-PORT=4000
-CLIENT_ORIGIN=*
-# Optional AI API keys for enhanced translation / STT
-# GEMINI_API_KEY=
-# OPENAI_API_KEY=
-# GROQ_API_KEY=
-```
-
-**Client (`client/.env`):**
-```env
-VITE_SERVER_URL=http://localhost:4000
-VITE_LAN_IP=
+ai-video-call/
+├── client/                        # React 18 + Vite Web Application
+│   ├── src/
+│   │   ├── components/            # UI components (OfflineTranslateBar, VideoGrid, etc.)
+│   │   ├── context/               # TranslationContext & RoomContext
+│   │   ├── lib/                   # offlineTranslator, offlineDataset, offlineNumbers, offlineLexicon
+│   │   └── pages/                 # HomePage, CallPage
+│   ├── vercel.json                # Vercel SPA routing configuration
+│   └── vite.config.js             # Vite configuration with HTTPS support
+├── server/                        # Node.js + Express + Socket.IO Backend
+│   ├── src/
+│   │   ├── handlers/              # Signaling, room, and translation event handlers
+│   │   ├── services/              # TTS service, STT service, translation service
+│   │   └── lib/                   # Self-contained offline translation library
+│   └── package.json               # Server dependencies
+├── flutter_app/                   # Cross-Platform Flutter Mobile Application
+│   ├── lib/                       # Screens, services, models, and widgets
+│   ├── android/                   # Android native manifest with camera/mic permissions
+│   └── ios/                       # iOS runner with camera/mic usage descriptions
+├── render.yaml                    # Render Cloud deployment blueprint
+├── vercel.json                    # Root Vercel monorepo configuration
+└── README.md                      # Project documentation
 ```
 
 ---
 
 ## 💻 Running Locally
 
-Start the backend and frontend in separate terminals:
+### 1. Clone & Install Dependencies
+```bash
+git clone https://github.com/Asmitha08/ai-video-call.git
+cd ai-video-call
+npm run install:all
+```
 
-### Terminal 1: Backend Server
+### 2. Start the Backend Server
 ```bash
 npm run dev:server
 ```
-Runs at: `http://localhost:4000`
+*Backend runs on `http://localhost:4000` (and LAN IP `http://192.168.0.x:4000`).*
 
-### Terminal 2: Frontend Client
+### 3. Start the Web Client
 ```bash
 npm run dev:client
 ```
-Runs at: `https://localhost:5173`
+*Frontend runs on `https://localhost:5173` with self-signed SSL.*
+
+### 4. Run the Flutter Mobile App
+```bash
+cd flutter_app
+flutter pub get
+flutter run
+```
+*Enter your PC's IP or Render URL in the mobile app server field.*
 
 ---
 
 ## ☁️ Deployment Guide
 
-### Deploying Backend to Render
-1. Create a new **Web Service** on [Render](https://dashboard.render.com).
-2. Connect repository `Asmitha08/ai-video-call`.
-3. Configuration:
-   - **Root Directory**: `server`
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-4. Copy your live Render URL (e.g. `https://ai-video-call-1.onrender.com`).
+### Deploying the Backend to Render
+1. Open [dashboard.render.com](https://dashboard.render.com) and click **New +** $\rightarrow$ **Web Service**.
+2. Connect repository **`Asmitha08/ai-video-call`**.
+3. Set **Root Directory** to `server`.
+4. Set **Build Command** to `npm install` and **Start Command** to `npm start`.
+5. Select the **Free** instance plan and click **Deploy**.
+6. Copy your live Render URL (*e.g., `https://ai-video-call-1.onrender.com`*).
 
-### Deploying Frontend to Vercel
-1. Import repository `Asmitha08/ai-video-call` on [Vercel](https://vercel.com/new).
-2. Configuration:
-   - **Framework Preset**: `Vite`
-   - **Root Directory**: `client`
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-3. Environment Variables:
+### Deploying the Frontend to Vercel
+1. Open [vercel.com/new](https://vercel.com/new) and import **`Asmitha08/ai-video-call`**.
+2. Set **Root Directory** to `client` and **Framework Preset** to `Vite`.
+3. Under **Environment Variables**, add:
    - `VITE_SERVER_URL`: `https://ai-video-call-1.onrender.com`
-4. Deploy!
+4. Click **Deploy**.
 
 ---
 
-## 📱 Testing Across Mobile Devices (LAN)
-1. Ensure your PC and mobile phone are connected to the same Wi-Fi network.
-2. Find your PC's local IP address (e.g., `192.168.0.230`).
-3. Open `https://<YOUR_PC_IP>:5173` on your mobile browser.
-4. Accept the self-signed SSL certificate prompt to allow camera and microphone access.
+## 📄 License
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
