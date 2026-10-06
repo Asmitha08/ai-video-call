@@ -86,10 +86,33 @@ const TranslationContext = createContext(null);
 export function TranslationProvider({ children }) {
   const { room, localStream, isAudioMuted } = useCall();
 
-  // Settings
+  // Settings with persistent language preference
   const [captionsEnabled, setCaptionsEnabled] = useState(true);
-  const [myLanguage, setMyLanguage] = useState('en'); // spoken source language (en, te, hi, es, ta)
-  const [targetLanguage, setTargetLanguage] = useState('te'); // subtitle & TTS target language (default: Telugu)
+  const [myLanguage, setMyLanguageState] = useState(() => {
+    try {
+      return localStorage.getItem('ai_spoken_language') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+  const [targetLanguage, setTargetLanguageState] = useState(() => {
+    try {
+      return localStorage.getItem('ai_target_language') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+
+  const setMyLanguage = useCallback((lang) => {
+    setMyLanguageState(lang);
+    try { localStorage.setItem('ai_spoken_language', lang); } catch {}
+  }, []);
+
+  const setTargetLanguage = useCallback((lang) => {
+    setTargetLanguageState(lang);
+    try { localStorage.setItem('ai_target_language', lang); } catch {}
+  }, []);
+
   const [speakTranslations, setSpeakTranslations] = useState(true); // TTS voice read-aloud
   const [hearSelfTranslation, setHearSelfTranslation] = useState(true); // Default to true so user hears own translation
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -151,7 +174,7 @@ export function TranslationProvider({ children }) {
     if (!text || !text.trim()) return '';
     const cleanText = text.trim();
     const s = (sourceLang || 'en').split('-')[0].toLowerCase();
-    const t = (targetLang || 'te').split('-')[0].toLowerCase();
+    const t = (targetLang || targetLangRef.current || targetLanguage || 'en').split('-')[0].toLowerCase();
     if (s === t && s !== 'auto') return cleanText;
 
     const cacheKey = `${s}->${t}:${cleanText.toLowerCase()}`;
@@ -329,22 +352,31 @@ export function TranslationProvider({ children }) {
       }
 
       // Ensure the text is strictly in the chosen target language!
-      // If targetCode is non-Latin (e.g. te, hi, ta, etc.) and cleanText is Latin (English),
-      // auto-translate to targetCode so the voice NEVER reads raw English words!
       let textToSpeak = cleanText;
+      const srcLangForSpeech = myLangRef.current || 'auto';
       if (targetCode !== 'en') {
         const isNonLatinTarget = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(targetCode);
         const isInputLatin = !/[^\x00-\x7F]/.test(cleanText);
         if (isNonLatinTarget && isInputLatin) {
           try {
-            const offlineT = translateOffline(cleanText, 'en', targetCode);
+            const offlineT = translateOffline(cleanText, srcLangForSpeech, targetCode);
             if (offlineT && offlineT !== cleanText && /[^\x00-\x7F]/.test(offlineT)) {
               textToSpeak = offlineT;
             } else if (typeof navigator !== 'undefined' && navigator.onLine && translateRef.current) {
-              const onlineT = await translateRef.current(cleanText, 'en', targetCode);
+              const onlineT = await translateRef.current(cleanText, srcLangForSpeech, targetCode);
               if (onlineT && onlineT.trim()) {
                 textToSpeak = onlineT.trim();
               }
+            }
+          } catch {}
+        }
+      } else {
+        const isInputNonLatin = /[^\x00-\x7F]/.test(cleanText);
+        if (isInputNonLatin && typeof navigator !== 'undefined' && navigator.onLine && translateRef.current) {
+          try {
+            const onlineT = await translateRef.current(cleanText, srcLangForSpeech, 'en');
+            if (onlineT && onlineT.trim()) {
+              textToSpeak = onlineT.trim();
             }
           } catch {}
         }
@@ -771,7 +803,7 @@ export function TranslationProvider({ children }) {
           if (isStopped || isAudioMutedRef.current || !captionsEnabledRef.current) return;
 
           const currentMyLang = (myLangRef.current || 'en').split('-')[0];
-          const currentTargetLang = targetLangRef.current || 'te';
+          const currentTargetLang = targetLangRef.current || targetLanguage || 'en';
           const currentRoom = roomRef.current;
           const activeSocketId = socket.id || 'local';
 

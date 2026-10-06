@@ -53,18 +53,29 @@ export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
 
   let textToSynthesize = text.trim();
 
-  // If target language is non-Latin (e.g. Telugu, Hindi, Tamil, Russian, etc.),
-  // but the input text contains only Latin/English letters:
-  // Automatically translate the text to the target language before generating speech!
+  // Ensure textToSynthesize matches target language script:
   if (baseLang !== 'en') {
     const isNonLatinTarget = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(baseLang);
     const isInputLatin = !/[^\x00-\x7F]/.test(textToSynthesize);
     if (isNonLatinTarget && isInputLatin) {
       try {
-        const translated = await translateText(textToSynthesize, 'en', baseLang);
+        const translated = await translateText(textToSynthesize, 'auto', baseLang);
         if (translated && translated.trim() && /[^\x00-\x7F]/.test(translated)) {
           textToSynthesize = translated.trim();
           console.log(`[tts] auto-translated "${text.trim()}" -> "${textToSynthesize}" (${baseLang}) before synthesis`);
+        }
+      } catch (err) {
+        console.warn('[tts] pre-synthesis translation error:', err.message);
+      }
+    }
+  } else {
+    const isInputNonLatin = /[^\x00-\x7F]/.test(textToSynthesize);
+    if (isInputNonLatin) {
+      try {
+        const translated = await translateText(textToSynthesize, 'auto', 'en');
+        if (translated && translated.trim() && !/[^\x00-\x7F]/.test(translated)) {
+          textToSynthesize = translated.trim();
+          console.log(`[tts] auto-translated non-Latin text to English: "${textToSynthesize}" before synthesis`);
         }
       } catch (err) {
         console.warn('[tts] pre-synthesis translation error:', err.message);

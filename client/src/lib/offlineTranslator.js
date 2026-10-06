@@ -82,11 +82,11 @@ export function normalizeText(text) {
  * @param {string} targetLang Target language code (e.g., 'te', 'ja', 'es', 'de', 'en', etc.)
  * @returns {string} Translated text in target language
  */
-export function translateOffline(text, sourceLang = 'en', targetLang = 'te') {
+export function translateOffline(text, sourceLang = 'en', targetLang = 'en') {
   if (!text || !text.trim()) return '';
   let clean = text.trim();
   const s = (sourceLang || 'en').split('-')[0].toLowerCase();
-  const t = (targetLang || 'te').split('-')[0].toLowerCase();
+  const t = (targetLang || 'en').split('-')[0].toLowerCase();
 
   // If source and target are the same language, return as is
   if (s === t && s !== 'auto') return clean;
@@ -226,7 +226,7 @@ export function translateOffline(text, sourceLang = 'en', targetLang = 'te') {
  */
 export function getPhoneticFallback(text, targetLang) {
   if (!text) return '';
-  const t = (targetLang || 'te').split('-')[0].toLowerCase();
+  const t = (targetLang || 'en').split('-')[0].toLowerCase();
   const normalized = normalizeText(text);
 
   // 1. Check if text is a translated number (e.g. "ఎనభై తొమ్మిది" or "89")

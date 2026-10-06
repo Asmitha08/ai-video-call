@@ -265,7 +265,7 @@ const ENGLISH_NUMBER_WORDS = {
 /**
  * Parses an integer (0 - 9999) and translates it authentically into the target language.
  */
-export function translateNumericValue(num, targetLang = 'te') {
+export function translateNumericValue(num, targetLang = 'en') {
   const t = targetLang.split('-')[0].toLowerCase();
 
   // Direct unit or teen (0 - 19)
@@ -336,7 +336,7 @@ export function translateNumericValue(num, targetLang = 'te') {
 /**
  * Phonetic transliteration for compound numbers for clear TTS playback.
  */
-export function getNumericPhonetic(num, targetLang = 'te') {
+export function getNumericPhonetic(num, targetLang = 'en') {
   const t = targetLang.split('-')[0].toLowerCase();
 
   if (UNITS_DATA[num] && UNITS_DATA[num]._roman && UNITS_DATA[num]._roman[t]) {
@@ -367,7 +367,7 @@ export function getNumericPhonetic(num, targetLang = 'te') {
  * Detects if a text fragment is a number phrase (e.g. "eighty nine", "eighty-nine", "89", "twenty five")
  * and translates it completely into the target language.
  */
-export function tryTranslateNumber(text, targetLang = 'te') {
+export function tryTranslateNumber(text, targetLang = 'en') {
   if (!text) return null;
   // Strip punctuation and hyphens
   const clean = text
@@ -448,7 +448,7 @@ for (const [_, data] of Object.entries(TENS_DATA)) {
 /**
  * Replaces compound numbers, standalone numbers, and digits in a sentence.
  */
-export function replaceNumbersInSentence(text, targetLang = 'te') {
+export function replaceNumbersInSentence(text, targetLang = 'en') {
   if (!text) return text;
   let result = text;
 

@@ -101,6 +101,7 @@ export default function CallControls({
     captionsEnabled,
     toggleCaptions,
     targetLanguageObj,
+    myLanguageObj,
     speakTranslations,
     toggleSpeakTranslations,
     isTranscribing,
@@ -155,9 +156,13 @@ export default function CallControls({
         id="btn-translation-settings"
         onClick={onOpenTranslateSettings}
         active={false}
-        label={`➔ ${targetLanguageObj.code.toUpperCase()}`}
+        label={
+          myLanguageObj.code === targetLanguageObj.code
+            ? `🗣️ ${myLanguageObj.code.toUpperCase()}`
+            : `${myLanguageObj.code.toUpperCase()} ➔ ${targetLanguageObj.code.toUpperCase()}`
+        }
         icon={<GlobeIcon />}
-        tooltip="AI Translation & Language Settings"
+        tooltip={`Language: ${myLanguageObj.name} ➔ ${targetLanguageObj.name} (Click to change)`}
       />
 
       {/* TTS Read Aloud Quick Toggle */}
