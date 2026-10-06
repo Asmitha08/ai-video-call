@@ -10,7 +10,6 @@ import { socket } from '../lib/socket.js';
 import { useCall } from './CallContext.jsx';
 import { SUPPORTED_LANGUAGES, getLanguageByCode } from '../lib/languages.js';
 import { translateOffline, getPhoneticFallback } from '../lib/offlineTranslator.js';
-import { WavRecorder, blobToBase64 } from '../lib/wavRecorder.js';
 
 // Common acoustic noise, breathing, throat clearing, and non-speech filler tokens
 const NOISE_TOKENS = new Set([
@@ -19,7 +18,7 @@ const NOISE_TOKENS = new Set([
   'gasp', 'sigh', 'click', 'clicks', 'clack', 'tick', 'buzz', 'static', 'beep',
   'woosh', 'throat', 'inaudible', 'applause', 'music', 'laughter', 'noise',
   'coughing', 'mhm', 'mm', 'mmm', 'mm-hmm', 'uh-huh', 'huh', 'ooh', 'whoa',
-  'pfft', 'pff', 'brr', 'ach', 'oops'
+  'pfft', 'pff', 'brr', 'ach', 'oops', 'clearing', 'whisper', 'breath', 'breathing'
 ]);
 
 /**
@@ -30,8 +29,8 @@ function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
   const text = rawText.trim();
   if (!text) return true;
 
-  // 1. Confidence threshold: Chrome emits confidence < 0.40 for ambient noise/clicks
-  if (confidence > 0 && confidence < 0.42) {
+  // 1. Confidence threshold: Chrome emits confidence < 0.50 for ambient noise/clicks
+  if (confidence > 0 && confidence < 0.50) {
     return true;
   }
 
@@ -44,6 +43,11 @@ function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
   const clean = text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"'…]/g, '').trim();
   if (!clean) return true;
 
+  // Single characters in any language (unless specific grammatical words like 'I' or 'a')
+  if (clean.length < 2 && !['a', 'i', 'я', '我'].includes(clean)) {
+    return true;
+  }
+
   // 3. Acoustic noise filler check
   const words = clean.split(/\s+/).filter(Boolean);
   if (words.length === 0) return true;
@@ -54,7 +58,7 @@ function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
   }
 
   // 4. Repeated character gibberish (e.g., "shhhh", "ssss", "zzzzz", "kkkkk")
-  if (/(.)\1{3,}/.test(clean)) {
+  if (/(.)\1{2,}/.test(clean)) {
     return true;
   }
 
@@ -65,11 +69,9 @@ function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
   if (latinLangs.includes(baseLang)) {
     if (words.length === 1) {
       const single = words[0];
-      // Single character in Latin script is only valid if 'a', 'i', 'y', 'o'
-      if (single.length === 1 && !['a', 'i', 'y', 'o'].includes(single)) {
+      if (single.length === 1 && !['a', 'i'].includes(single)) {
         return true;
       }
-      // Two-character consonant clusters with no vowels e.g. "th", "sh", "ck", "st", "ps"
       if (single.length === 2 && !/[aeiouy]/.test(single)) {
         return true;
       }
@@ -78,35 +80,6 @@ function isNoiseOrGibberish(rawText, confidence = 1.0, lang = 'en') {
 
   return false;
 }
-
-// Regional voice fallbacks for offline devices where regional voice packages may not be pre-installed
-const REGIONAL_VOICE_FALLBACKS = {
-  te: ['te-IN', 'hi-IN', 'en-IN', 'ta-IN', 'kn-IN', 'mr-IN', 'bn-IN'],
-  hi: ['hi-IN', 'en-IN', 'te-IN', 'ta-IN'],
-  ta: ['ta-IN', 'hi-IN', 'en-IN', 'te-IN'],
-  kn: ['kn-IN', 'hi-IN', 'en-IN', 'te-IN'],
-  ml: ['ml-IN', 'hi-IN', 'en-IN', 'ta-IN'],
-  mr: ['mr-IN', 'hi-IN', 'en-IN'],
-  bn: ['bn-IN', 'hi-IN', 'en-IN'],
-  gu: ['gu-IN', 'hi-IN', 'en-IN'],
-  pa: ['pa-IN', 'hi-IN', 'en-IN'],
-  es: ['es-ES', 'es-MX', 'es-US', 'pt-BR', 'it-IT'],
-  pt: ['pt-BR', 'pt-PT', 'es-ES'],
-  it: ['it-IT', 'es-ES', 'fr-FR'],
-  fr: ['fr-FR', 'fr-CA', 'es-ES'],
-  de: ['de-DE', 'de-AT', 'nl-NL', 'en-US'],
-  nl: ['nl-NL', 'de-DE', 'en-US'],
-  zh: ['zh-CN', 'zh-TW', 'zh-HK'],
-  ja: ['ja-JP'],
-  ko: ['ko-KR'],
-  ru: ['ru-RU'],
-  ar: ['ar-SA', 'ar-EG'],
-  tr: ['tr-TR'],
-  vi: ['vi-VN'],
-  th: ['th-TH'],
-  id: ['id-ID', 'ms-MY'],
-  en: ['en-US', 'en-GB', 'en-IN', 'en-AU']
-};
 
 const TranslationContext = createContext(null);
 
@@ -118,7 +91,7 @@ export function TranslationProvider({ children }) {
   const [myLanguage, setMyLanguage] = useState('en'); // spoken source language (en, te, hi, es, ta)
   const [targetLanguage, setTargetLanguage] = useState('te'); // subtitle & TTS target language (default: Telugu)
   const [speakTranslations, setSpeakTranslations] = useState(true); // TTS voice read-aloud
-  const [hearSelfTranslation, setHearSelfTranslation] = useState(true); // Hear own translation in solo / test mode
+  const [hearSelfTranslation, setHearSelfTranslation] = useState(false); // Default to false to eliminate mic-to-speaker feedback loop
   const [isTranscribing, setIsTranscribing] = useState(false);
 
   // Live subtitles on screen: socketId -> { displayName, originalText, translatedText, sourceLang, targetLang, isFinal, timestamp }
@@ -139,6 +112,7 @@ export function TranslationProvider({ children }) {
   const lastFinalTranscriptRef = useRef({ text: '', time: 0 });
   const lastTtsEndTimeRef = useRef(0);
   const lastTtsSpokenPhrasesRef = useRef([]);
+  const spokenUtteranceKeysRef = useRef(new Set());
   const hearSelfTranslationRef = useRef(hearSelfTranslation);
   hearSelfTranslationRef.current = hearSelfTranslation;
 
@@ -329,9 +303,18 @@ export function TranslationProvider({ children }) {
       }
       lastSpokenRef.current = { text: cleanText, time: now };
 
-      // Ensure audio synthesis context is active
-      if ('speechSynthesis' in window && window.speechSynthesis.paused) {
-        try { window.speechSynthesis.resume(); } catch {}
+      // Immediately cancel any previous ongoing audio/speech to prevent stutter or overlaps
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current.currentTime = 0;
+        } catch {}
+      }
+      if ('speechSynthesis' in window) {
+        try {
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+          window.speechSynthesis.cancel();
+        } catch {}
       }
 
       // Record spoken phrase for echo loop suppression
@@ -340,7 +323,7 @@ export function TranslationProvider({ children }) {
         lastTtsSpokenPhrasesRef.current.shift();
       }
 
-      // ── Helper to execute on-device browser SpeechSynthesis with full fallbacks ──
+      // ── Helper to execute on-device browser SpeechSynthesis with clean phonetic fallback ──
       const playOnDeviceSpeech = () => {
         if (!('speechSynthesis' in window)) return;
         try {
@@ -357,7 +340,7 @@ export function TranslationProvider({ children }) {
           // 1. Exact BCP-47 match
           let matchedVoice = voices.find((v) => v.lang.toLowerCase() === bcp47.toLowerCase());
 
-          // 2. Language prefix match
+          // 2. Language prefix match (e.g., 'te' -> 'te-IN')
           if (!matchedVoice) {
             matchedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(targetCode));
           }
@@ -368,35 +351,31 @@ export function TranslationProvider({ children }) {
             matchedVoice = voices.find((v) => v.name.toLowerCase().includes(simpleName));
           }
 
-          // 4. Regional family fallback (e.g. for te, ta, kn -> check hi-IN or en-IN)
-          if (!matchedVoice && REGIONAL_VOICE_FALLBACKS[targetCode]) {
-            for (const fb of REGIONAL_VOICE_FALLBACKS[targetCode]) {
-              matchedVoice = voices.find(
-                (v) =>
-                  v.lang.toLowerCase() === fb.toLowerCase() ||
-                  v.lang.toLowerCase().startsWith(fb.split('-')[0].toLowerCase())
-              );
-              if (matchedVoice) break;
+          // Strict target language enforcement:
+          // If no native voice exists on this machine for targetCode (e.g. Windows PC without Telugu TTS installed):
+          // NEVER force a foreign language voice (e.g. Hindi or Tamil) to pronounce Telugu script!
+          let textToSpeak = cleanText;
+          if (!matchedVoice) {
+            // Convert native script to clean phonetic English transliteration
+            const phonetic = getPhoneticFallback(cleanText, targetCode);
+            if (phonetic) textToSpeak = phonetic;
+
+            // Use default or clean English voice to pronounce the transliterated text clearly
+            matchedVoice = voices.find((v) => v.lang.toLowerCase().startsWith('en') && (v.name.includes('Natural') || v.default))
+              || voices.find((v) => v.lang.toLowerCase().startsWith('en'))
+              || voices[0];
+          } else {
+            // A native voice exists! If native voice is Latin-only but text is Indic/Asian script:
+            const isNonLatinScript = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(targetCode);
+            const isVoiceLatinOnly = matchedVoice.lang.toLowerCase().startsWith('en') || matchedVoice.lang.toLowerCase().startsWith('es');
+            if (isNonLatinScript && isVoiceLatinOnly) {
+              const phonetic = getPhoneticFallback(cleanText, targetCode);
+              if (phonetic) textToSpeak = phonetic;
             }
           }
 
-          // 5. Default voice
-          if (!matchedVoice && voices.length > 0) {
-            matchedVoice = voices.find((v) => v.default) || voices[0];
-          }
-
-          // Detect if voice is English/Latin while text is Indic/Asian script
-          const isNonLatinScript = ['te', 'hi', 'ta', 'kn', 'ml', 'mr', 'gu', 'bn', 'pa', 'ja', 'ko', 'zh', 'ar', 'ru', 'th'].includes(targetCode);
-          const isVoiceLatinOnly = matchedVoice && (matchedVoice.lang.toLowerCase().startsWith('en') || matchedVoice.lang.toLowerCase().startsWith('es'));
-
-          let textToSpeak = cleanText;
-          if (isNonLatinScript && isVoiceLatinOnly) {
-            const phonetic = getPhoneticFallback(cleanText, targetCode);
-            if (phonetic) textToSpeak = phonetic;
-          }
-
           const utterance = new SpeechSynthesisUtterance(textToSpeak);
-          utterance.lang = matchedVoice ? matchedVoice.lang : bcp47;
+          utterance.lang = matchedVoice ? matchedVoice.lang : (textToSpeak !== cleanText ? 'en-US' : bcp47);
           utterance.rate = 1.0;
           utterance.volume = 1.0;
           if (matchedVoice) utterance.voice = matchedVoice;
@@ -413,7 +392,6 @@ export function TranslationProvider({ children }) {
             activeUtteranceRef.current = null;
             lastTtsEndTimeRef.current = Date.now();
 
-            // Auto-recovery if voice rejected script: try phonetic transliteration with default voice
             if (e.error === 'language-unavailable' || e.error === 'synthesis-failed') {
               try {
                 const recoveryText = getPhoneticFallback(cleanText, targetCode) || cleanText;
@@ -447,7 +425,7 @@ export function TranslationProvider({ children }) {
         if (socket.connected) {
           try {
             const res = await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('timeout')), 1200);
+              const timeout = setTimeout(() => reject(new Error('timeout')), 4500);
               socket.emit('caption:tts', { text: cleanText, targetLang: targetCode }, (resp) => {
                 clearTimeout(timeout);
                 if (resp?.audioBase64) resolve(resp);
@@ -563,25 +541,47 @@ export function TranslationProvider({ children }) {
         }, 12000)
       );
 
-      // Record to transcript history if final
+      // Record to transcript history if final and speak strictly ONCE per utterance
       if (isFinal && originalText.trim()) {
-        const entry = {
-          id: `${socketId}-${now}`,
-          speakerId: socketId,
-          displayName,
-          originalText,
-          translatedText: translatedText || originalText,
-          sourceLang,
-          targetLang,
-          timestamp: now,
-        };
+        const cleanOrig = originalText.trim().toLowerCase();
+        const turnKey = `${socketId}:${cleanOrig}`;
+        const alreadySpoken = spokenUtteranceKeysRef.current.has(turnKey);
 
-        setTranscriptHistory((prev) => [...prev, entry]);
+        if (!alreadySpoken) {
+          spokenUtteranceKeysRef.current.add(turnKey);
+          if (spokenUtteranceKeysRef.current.size > 120) {
+            const first = spokenUtteranceKeysRef.current.values().next().value;
+            spokenUtteranceKeysRef.current.delete(first);
+          }
 
-        // Speak incoming translated speech out loud via TTS
-        const isSelf = socketId === socket.id || socketId === 'local';
-        if (!isSelf || hearSelfTranslationRef.current) {
-          speakText(translatedText || originalText, targetLang);
+          const entry = {
+            id: `${socketId}-${now}`,
+            turnKey,
+            speakerId: socketId,
+            displayName,
+            originalText,
+            translatedText: translatedText || originalText,
+            sourceLang,
+            targetLang,
+            timestamp: now,
+          };
+
+          setTranscriptHistory((prev) => [...prev, entry]);
+
+          // Speak incoming translated speech out loud via TTS strictly once per utterance
+          const isSelf = socketId === socket.id || socketId === 'local';
+          if (!isSelf || hearSelfTranslationRef.current) {
+            speakText(translatedText || originalText, targetLang);
+          }
+        } else {
+          // If already spoken with fast translation, update entry with enriched translation without vocalizing again
+          if (translatedText) {
+            setTranscriptHistory((prev) =>
+              prev.map((item) =>
+                item.turnKey === turnKey ? { ...item, translatedText } : item
+              )
+            );
+          }
         }
       }
     },
@@ -622,133 +622,18 @@ export function TranslationProvider({ children }) {
     let restartTimer = null;
     let isStarting = false;
 
-    // Offline continuous recognition states
-    let offlineRecorder = null;
-    let offlineLoopTimer = null;
-    let isOfflineRunning = false;
-
     if (!captionsEnabled || isAudioMuted || !room) {
       setIsTranscribing(false);
       return;
     }
 
-    async function startOfflineAudioLoop() {
-      if (isStopped || isOfflineRunning) return;
-      isOfflineRunning = true;
-      setIsTranscribing(true);
-      setSttError(null);
-      console.log('[speech:offline] Starting local offline microphone recognition loop...');
-
-      try {
-        offlineRecorder = new WavRecorder();
-        await offlineRecorder.start(localStream);
-
-        const recordCycle = async () => {
-          if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
-            if (offlineRecorder) {
-              try { offlineRecorder.stop(); } catch {}
-              offlineRecorder = null;
-            }
-            isOfflineRunning = false;
-            setIsTranscribing(false);
-            return;
-          }
-
-          let blob = null;
-          try {
-            blob = offlineRecorder.stop();
-          } catch {}
-          offlineRecorder = null;
-
-          if (blob && blob.size > 800) {
-            try {
-              const base64 = await blobToBase64(blob);
-              const currentMyLang = (myLangRef.current || 'en').split('-')[0];
-              const currentTargetLang = targetLangRef.current || 'te';
-              const activeSocketId = socket.id || 'local';
-              const currentRoom = roomRef.current;
-
-              const res = await fetch('/api/stt', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  audioBase64: base64,
-                  mimeType: 'audio/wav',
-                  sourceLang: currentMyLang,
-                }),
-              });
-
-              if (res.ok) {
-                const data = await res.json();
-                const text = data?.transcript ? data.transcript.trim() : '';
-
-                if (text && !isNoiseOrGibberish(text, 1.0, currentMyLang)) {
-                  console.log('[speech:offline] Recognized offline transcript:', text);
-                  const fastTranslation = translateSync(text, currentMyLang, currentTargetLang);
-
-                  if (updateCaptionRef.current) {
-                    updateCaptionRef.current({
-                      socketId: activeSocketId,
-                      displayName: currentRoom?.displayName || 'You',
-                      originalText: text,
-                      translatedText: fastTranslation,
-                      sourceLang: currentMyLang,
-                      targetLang: currentTargetLang,
-                      isFinal: true,
-                    });
-                  }
-
-                  socket.emit('caption:speak', {
-                    text,
-                    sourceLang: currentMyLang,
-                    isFinal: true,
-                    displayName: currentRoom?.displayName || 'You',
-                  });
-                }
-              }
-            } catch (err) {
-              console.warn('[speech:offline] processing error:', err.message);
-            }
-          }
-
-          // Restart recorder for next cycle
-          if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
-            try {
-              offlineRecorder = new WavRecorder();
-              await offlineRecorder.start(localStream);
-              offlineLoopTimer = setTimeout(recordCycle, 3200);
-            } catch (recErr) {
-              console.warn('[speech:offline] loop restart error:', recErr);
-              isOfflineRunning = false;
-            }
-          } else {
-            isOfflineRunning = false;
-            setIsTranscribing(false);
-          }
-        };
-
-        offlineLoopTimer = setTimeout(recordCycle, 3200);
-      } catch (err) {
-        console.warn('[speech:offline] mic recorder error:', err);
-        isOfflineRunning = false;
-        setSttError('Microphone error: ' + err.message);
-      }
-    }
-
     if (!SpeechRecognition) {
-      console.log('[speech] Web Speech API not present, using Offline Audio Recognizer...');
-      startOfflineAudioLoop();
-      return () => {
-        isStopped = true;
-        if (offlineLoopTimer) clearTimeout(offlineLoopTimer);
-        if (offlineRecorder) {
-          try { offlineRecorder.stop(); } catch {}
-        }
-      };
+      setSttError('Speech recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.');
+      return;
     }
 
     function startSession() {
-      if (isStopped || isStarting || isOfflineRunning) return;
+      if (isStopped || isStarting) return;
       isStarting = true;
 
       try {
@@ -790,7 +675,10 @@ export function TranslationProvider({ children }) {
           const isTtsSpeakingNow =
             (window.speechSynthesis && window.speechSynthesis.speaking) ||
             (activeAudioRef.current && !activeAudioRef.current.paused) ||
-            Date.now() - lastTtsEndTimeRef.current < 750;
+            Date.now() - lastTtsEndTimeRef.current < 900;
+
+          // Hard echo gate: if TTS is actively speaking aloud, discard mic input to prevent acoustic loopback
+          if (isTtsSpeakingNow) return;
 
           let interim = '';
           let finalTranscript = '';
@@ -801,13 +689,13 @@ export function TranslationProvider({ children }) {
               const rawChunk = (item[0].transcript || '').trim();
               const confidence = typeof item[0].confidence === 'number' ? item[0].confidence : 1.0;
 
-              // Filter out background noise, static, breaths, clicks, or gibberish
-              if (isNoiseOrGibberish(rawChunk, confidence, currentMyLang)) {
+              // Filter out ambient background noise, static, breaths, clicks (< 0.52 confidence)
+              if (confidence > 0 && confidence < 0.52) {
                 continue;
               }
 
-              // Filter out speaker loopback during active TTS
-              if (isTtsSpeakingNow && confidence < 0.65) {
+              // Filter out non-speech noise and filler tokens
+              if (isNoiseOrGibberish(rawChunk, confidence, currentMyLang)) {
                 continue;
               }
 
@@ -832,16 +720,16 @@ export function TranslationProvider({ children }) {
           const isEcho = lastTtsSpokenPhrasesRef.current.some(
             (spoken) => spoken.includes(activeText.toLowerCase()) || activeText.toLowerCase().includes(spoken)
           );
-          if (isEcho && (isTtsSpeakingNow || Date.now() - lastTtsEndTimeRef.current < 2500)) {
+          if (isEcho && Date.now() - lastTtsEndTimeRef.current < 3000) {
             return;
           }
 
           const isFinal = Boolean(finalTranscript.trim());
 
-          // Prevent rapid duplicate repeats of the exact same final sentence
+          // Prevent rapid duplicate repeats of the exact same final sentence within 3000ms
           const now = Date.now();
           if (isFinal) {
-            if (lastFinalTranscriptRef.current.text === activeText && now - lastFinalTranscriptRef.current.time < 2200) {
+            if (lastFinalTranscriptRef.current.text === activeText && now - lastFinalTranscriptRef.current.time < 3000) {
               return;
             }
             lastFinalTranscriptRef.current = { text: activeText, time: now };
@@ -900,28 +788,21 @@ export function TranslationProvider({ children }) {
           } else if (e.error === 'audio-capture') {
             setSttError('No microphone detected. Please check your microphone connection.');
           } else if (e.error === 'network') {
-            // When browser speech recognition encounters network error in offline mode,
-            // seamlessly fall back to local offline speech recognizer engine!
-            console.log('[speech:recognition] Offline network error detected. Switching to local offline SAPI recognizer...');
-            try {
-              recognition.abort();
-            } catch {}
-            activeSession = null;
-            startOfflineAudioLoop();
+            setSttError('Offline mode: Desktop Chrome requires internet for voice recognition. Use the Offline Quick-Translate bar below to translate & speak in all 25 languages offline!');
           }
         };
 
         recognition.onend = () => {
           isStarting = false;
-          if (isOfflineRunning || isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
-            if (!isOfflineRunning) setIsTranscribing(false);
+          if (isStopped || !captionsEnabledRef.current || isAudioMutedRef.current || !roomRef.current) {
+            setIsTranscribing(false);
             return;
           }
 
           // Restart session smoothly with fresh instance
           if (restartTimer) clearTimeout(restartTimer);
           restartTimer = setTimeout(() => {
-            if (!isStopped && !isOfflineRunning && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
+            if (!isStopped && captionsEnabledRef.current && !isAudioMutedRef.current && roomRef.current) {
               startSession();
             }
           }, 250);
@@ -934,8 +815,8 @@ export function TranslationProvider({ children }) {
         isStarting = false;
         console.warn('[speech:session] start error:', err);
         if (!isStopped) {
-          // Fall back to offline audio loop if recognition throws
-          startOfflineAudioLoop();
+          if (restartTimer) clearTimeout(restartTimer);
+          restartTimer = setTimeout(startSession, 1000);
         }
       }
     }
@@ -946,10 +827,6 @@ export function TranslationProvider({ children }) {
       isStopped = true;
       isStarting = false;
       if (restartTimer) clearTimeout(restartTimer);
-      if (offlineLoopTimer) clearTimeout(offlineLoopTimer);
-      if (offlineRecorder) {
-        try { offlineRecorder.stop(); } catch {}
-      }
       if (activeSession) {
         try {
           activeSession.onend = null;

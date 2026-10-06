@@ -219,84 +219,6 @@ export function translateOffline(text, sourceLang = 'en', targetLang = 'te') {
   return transformedText || clean;
 }
 
-// Character mapping tables for Indic and Asian phonetic romanization
-const INDIC_CONSONANTS = {
-  // Telugu
-  'క': 'ka', 'ఖ': 'kha', 'గ': 'ga', 'ఘ': 'gha', 'ఙ': 'nga',
-  'చ': 'cha', 'ఛ': 'chha', 'జ': 'ja', 'ఝ': 'jha', 'ఞ': 'nya',
-  'ట': 'ta', 'ఠ': 'tha', 'డ': 'da', 'ఢ': 'dha', 'ణ': 'na',
-  'త': 'ta', 'థ': 'tha', 'ద': 'da', 'ధ': 'dha', 'న': 'na',
-  'ప': 'pa', 'ఫ': 'pha', 'బ': 'ba', 'భ': 'bha', 'మ': 'ma',
-  'య': 'ya', 'ర': 'ra', 'ల': 'la', 'వ': 'va', 'శ': 'sha', 'ష': 'sha', 'స': 'sa', 'హ': 'ha', 'ళ': 'la',
-  // Hindi / Devanagari
-  'क': 'ka', 'ख': 'kha', 'ग': 'ga', 'घ': 'gha', 'ङ': 'nga',
-  'च': 'cha', 'छ': 'chha', 'ज': 'ja', 'झ': 'jha', 'ञ': 'nya',
-  'ट': 'ta', 'ठ': 'tha', 'ड': 'da', 'ढ': 'dha', 'ण': 'na',
-  'त': 'ta', 'थ': 'tha', 'द': 'da', 'ध': 'dha', 'न': 'na',
-  'प': 'pa', 'फ': 'pha', 'ब': 'ba', 'भ': 'bha', 'म': 'ma',
-  'य': 'ya', 'र': 'ra', 'ल': 'la', 'व': 'va', 'श': 'sha', 'ष': 'sha', 'स': 'sa', 'ह': 'ha',
-  // Tamil
-  'க': 'ka', 'ங': 'nga', 'ச': 'cha', 'ஞ': 'nya', 'ட': 'ta', 'ண': 'na',
-  'த': 'ta', 'ந': 'na', 'ப': 'pa', 'ம': 'ma', 'ய': 'ya', 'ர': 'ra',
-  'ல': 'la', 'வ': 'va', 'ழ': 'zha', 'ள': 'la', 'ற': 'ra', 'ன': 'na'
-};
-
-const VOWEL_SIGNS = {
-  // Telugu
-  'ా': 'aa', 'ి': 'i', 'ీ': 'ee', 'ు': 'u', 'ూ': 'oo', 'ృ': 'ru',
-  'ె': 'e', 'ే': 'e', 'ై': 'ai', 'ొ': 'o', 'ో': 'o', 'ౌ': 'au', 'ం': 'm', 'ః': 'h',
-  // Devanagari
-  'ा': 'aa', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri',
-  'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au', 'ं': 'n', 'ः': 'h',
-  // Tamil
-  'ா': 'aa', 'ி': 'i', 'ீ': 'ee', 'ு': 'u', 'ூ': 'oo',
-  'ெ': 'e', 'ே': 'e', 'ை': 'ai', 'ொ': 'o', 'ோ': 'o', 'ௌ': 'au'
-};
-
-const INDEPENDENT_VOWELS = {
-  // Telugu
-  'అ': 'a', 'ఆ': 'aa', 'ఇ': 'i', 'ఈ': 'ee', 'ఉ': 'u', 'ఊ': 'oo', 'ఋ': 'ru',
-  'ఎ': 'e', 'ఏ': 'e', 'ఐ': 'ai', 'ఒ': 'o', 'ఓ': 'o', 'ఔ': 'au',
-  // Devanagari
-  'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo', 'ऋ': 'ri',
-  'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au',
-  // Tamil
-  'அ': 'a', 'ஆ': 'aa', 'இ': 'i', 'ஈ': 'ee', 'உ': 'u', 'ஊ': 'oo',
-  'எ': 'e', 'ஏ': 'e', 'ஐ': 'ai', 'ஒ': 'o', 'ஓ': 'o', 'ஔ': 'au'
-};
-
-export function transliterateIndic(text) {
-  if (!text) return '';
-  let out = '';
-  const chars = Array.from(text);
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    const next = chars[i + 1];
-
-    if (INDEPENDENT_VOWELS[ch]) {
-      out += INDEPENDENT_VOWELS[ch];
-    } else if (INDIC_CONSONANTS[ch]) {
-      const baseConsonant = INDIC_CONSONANTS[ch].slice(0, -1);
-      if (next && VOWEL_SIGNS[next] !== undefined) {
-        out += baseConsonant + VOWEL_SIGNS[next];
-        i++;
-      } else if (next === '్' || next === '्' || next === '்') {
-        out += baseConsonant;
-        i++;
-      } else {
-        out += INDIC_CONSONANTS[ch];
-      }
-    } else if (VOWEL_SIGNS[ch]) {
-      out += VOWEL_SIGNS[ch];
-    } else if (ch === '్' || ch === '्' || ch === '்') {
-      // ignore standalone virama
-    } else {
-      out += ch;
-    }
-  }
-  return out;
-}
-
 /**
  * Returns phonetic romanized transcription for speech synthesis fallback.
  * Used when the user's OS has no native voice installed for an Indic/Asian language.
@@ -316,13 +238,23 @@ export function getPhoneticFallback(text, targetLang) {
     }
   }
 
-  // 2. Check phrase dictionary romanization
-  for (const [_, langMap] of Object.entries(DATASET_PHRASES)) {
-    if (langMap[t] && (normalizeText(langMap[t]) === normalized || langMap[t].trim() === text.trim())) {
-      if (langMap._roman && langMap._roman[t]) {
-        return langMap._roman[t];
+  // 2. Greedy subphrase substitution across DATASET_PHRASES (sorted longest target text first)
+  let romanizedText = text;
+  const sortedPhrases = Object.values(DATASET_PHRASES).sort(
+    (a, b) => ((b[t] || '').length - (a[t] || '').length)
+  );
+
+  for (const langMap of sortedPhrases) {
+    if (langMap[t] && langMap._roman && langMap._roman[t]) {
+      const tgtClean = langMap[t].replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, '').trim();
+      if (tgtClean && romanizedText.includes(tgtClean)) {
+        romanizedText = romanizedText.replace(tgtClean, langMap._roman[t]);
       }
     }
+  }
+
+  if (romanizedText !== text) {
+    return romanizedText.replace(/\s+/g, ' ').trim();
   }
 
   // 3. Check vocabulary romanization
@@ -334,29 +266,22 @@ export function getPhoneticFallback(text, targetLang) {
     }
   }
 
-  // 4. Word-by-word romanization fallback using explicit roman tags or phonetic transliteration
+  // 4. Word-by-word romanization fallback for compound phrases (only use genuine _roman mappings)
   const words = text.split(/\s+/);
-  const romanWords = words.map(w => {
-    const stripped = w.replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, '');
-    const punct = w.replace(/[^.,/#!$%^&*;:{}=\-_`~()?]/g, '');
-    if (!stripped) return w;
-    for (const [_, map] of Object.entries(OFFLINE_VOCABULARY)) {
-      if (map[t] && (map[t].trim() === stripped || normalizeText(map[t]) === normalizeText(stripped))) {
-        if (map._roman && map._roman[t]) return map._roman[t] + punct;
+  if (words.length > 1) {
+    const romanWords = words.map(w => {
+      const stripped = w.replace(/[.,/#!$%^&*;:{}=\-_`~()?]/g, '');
+      const punct = w.replace(/[^.,/#!$%^&*;:{}=\-_`~()?]/g, '');
+      if (!stripped) return w;
+      for (const [_, map] of Object.entries(OFFLINE_VOCABULARY)) {
+        if (map[t] && (map[t].trim() === stripped || normalizeText(map[t]) === normalizeText(stripped))) {
+          if (map._roman && map._roman[t]) return map._roman[t] + punct;
+        }
       }
-    }
-    // If word contains Indic characters, transliterate phonetically to Latin
-    if (/[^\x00-\x7F]/.test(stripped)) {
-      return transliterateIndic(stripped) + punct;
-    }
-    return w;
-  });
-
-  const combined = romanWords.join(' ').trim();
-  if (combined && combined !== text) return combined;
-
-  if (/[^\x00-\x7F]/.test(text)) {
-    return transliterateIndic(text);
+      return w;
+    });
+    const combined = romanWords.join(' ');
+    if (combined !== text) return combined;
   }
 
   return text;

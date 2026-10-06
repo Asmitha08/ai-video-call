@@ -232,7 +232,6 @@
   display: flex;
   gap: 0.4rem;
   width: 100%;
-  align-items: center;
 }
 
 .input {
@@ -256,48 +255,6 @@
   font-size: 0.78rem;
 }
 
-.micBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  color: #f1f5f9;
-  font-size: 0.76rem;
-  font-weight: 600;
-  padding: 0.42rem 0.7rem;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-}
-
-.micBtn:hover {
-  background: rgba(139, 92, 246, 0.25);
-  border-color: #8b5cf6;
-  color: #ffffff;
-  transform: translateY(-1px);
-}
-
-.micBtnRecording {
-  background: linear-gradient(135deg, #ef4444, #dc2626) !important;
-  border-color: #fca5a5 !important;
-  color: #ffffff !important;
-  box-shadow: 0 0 14px rgba(239, 68, 68, 0.6);
-  animation: micPulse 1.2s infinite ease-in-out;
-}
-
-@keyframes micPulse {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
-  }
-  50% {
-    transform: scale(1.04);
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.9);
-  }
-}
-
 .submitBtn {
   background: linear-gradient(135deg, hsl(265, 80%, 55%), hsl(220, 80%, 55%));
   border: none;
@@ -319,52 +276,6 @@
 .submitBtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.voiceStatusRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 0.35rem;
-  padding: 0.3rem 0.6rem;
-  background: rgba(15, 23, 42, 0.85);
-  border: 1px solid rgba(139, 92, 246, 0.25);
-  border-radius: 8px;
-  font-size: 0.75rem;
-  color: #cbd5e1;
-  animation: fadeIn 0.2s ease-in-out;
-}
-
-.voiceResultChip {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: #4ade80;
-  font-weight: 600;
-}
-
-.voiceResultOriginal {
-  color: #94a3b8;
-  font-weight: 500;
-}
-
-.voiceResultPhonetic {
-  color: #a78bfa;
-  font-style: italic;
-  font-size: 0.72rem;
-}
-
-.voiceCloseBtn {
-  background: transparent;
-  border: none;
-  color: #64748b;
-  font-size: 0.8rem;
-  cursor: pointer;
-  padding: 0 0.3rem;
-}
-
-.voiceCloseBtn:hover {
-  color: #f1f5f9;
 }
 
 /* ── Dataset Explorer Modal ──────────────────────────────────────────────── */

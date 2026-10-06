@@ -40,12 +40,20 @@ const NEURAL_VOICE_MAP = {
   id: 'id-ID-GadisNeural',       // Indonesian
 };
 
+// In-memory cache for synthesized neural speech audio buffers
+const ttsAudioCache = new Map();
+
 export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
   if (!text || !text.trim()) return null;
 
   const cleanLang = (targetLang ? targetLang.toLowerCase().trim() : 'en');
   const baseLang = cleanLang.split('-')[0];
   const voiceName = NEURAL_VOICE_MAP[cleanLang] || NEURAL_VOICE_MAP[baseLang] || 'en-US-JennyNeural';
+  const cacheKey = `${voiceName}:${text.trim()}`;
+
+  if (ttsAudioCache.has(cacheKey)) {
+    return ttsAudioCache.get(cacheKey);
+  }
 
   // ── 1. Edge Neural Deep Learning Vocoder (Free & High Quality) ──────────
   try {
@@ -69,11 +77,17 @@ export async function synthesizeNeuralSpeech(text, targetLang = 'en') {
 
     if (buffer && buffer.length > 500) {
       console.log(`[tts:edge-neural] generated ${buffer.length} bytes for voice "${voiceName}"`);
-      return {
+      const audioResult = {
         audioBase64: buffer.toString('base64'),
         mimeType: 'audio/mp3',
         voice: voiceName,
       };
+      if (ttsAudioCache.size > 200) {
+        const firstKey = ttsAudioCache.keys().next().value;
+        ttsAudioCache.delete(firstKey);
+      }
+      ttsAudioCache.set(cacheKey, audioResult);
+      return audioResult;
     }
   } catch (err) {
     console.warn(`[tts:edge-neural] voice "${voiceName}" failed:`, err.message);
